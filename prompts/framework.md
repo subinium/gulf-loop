@@ -77,6 +77,37 @@ Write to disk anything you need to remember.
 
 ---
 
+---
+
+### Autonomous mode — Git workflow
+
+> This section applies when `autonomous: true` (running on branch `{BRANCH}`).
+
+You are working on branch **`{BRANCH}`** and will merge into **`{BASE_BRANCH}`** automatically on completion.
+
+#### Commit every atomic unit with the **why**
+
+```
+git add -A && git commit -m "feat(scope): subject
+
+Why this approach: [reason]
+Why not the alternative: [tradeoff]"
+```
+
+The commit body is not optional. It is the audit trail. Make it answer: *why this, why not that.*
+
+#### If you receive merge conflict instructions
+
+1. `git log origin/{BASE_BRANCH}..HEAD` — understand what changed on both sides.
+2. Implement merged logic that preserves the intent of BOTH sides.
+3. Write or update tests covering the merged behavior.
+4. `git add -A && git commit -m "fix: resolve merge conflict with {BASE_BRANCH}"`
+5. Output the completion signal — merge is retried automatically.
+
+**Priority**: logic correctness > test coverage > style. Never discard one side's changes without understanding them.
+
+---
+
 ### Anti-patterns that waste iterations
 
 - **Metric gaming**: deleting or skipping tests to make the suite pass. The judge will catch this.

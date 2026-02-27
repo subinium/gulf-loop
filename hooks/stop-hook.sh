@@ -3,8 +3,9 @@
 #
 # Fires on every Claude Code "Stop" event.
 #
-# Normal mode:  re-injects prompt until <promise>COMPLETE</promise> found
-# Judge mode:   re-injects prompt until auto-checks pass AND Opus judge approves
+# Normal mode:      re-injects prompt until <promise>COMPLETE</promise> found
+# Judge mode:       re-injects prompt until auto-checks pass AND Opus judge approves
+# Autonomous mode:  any mode above, but no HITL pause — merges to base branch on completion
 #
 # State file: .claude/gulf-loop.local.md
 # ---
@@ -14,7 +15,12 @@
 # completion_promise: "COMPLETE"   # normal mode only
 # judge_enabled: true              # judge mode
 # consecutive_rejections: 0        # judge mode
-# hitl_threshold: 5                # judge mode
+# hitl_threshold: 5                # judge / autonomous mode
+# autonomous: true                 # autonomous mode
+# branch: gulf/auto-20260227       # autonomous mode — working branch
+# base_branch: main                # autonomous mode — merge target
+# worktree_path: /path/to/wt       # parallel mode only
+# merge_status: pending            # autonomous mode
 # ---
 # [original prompt]
 
@@ -54,6 +60,9 @@ CONSECUTIVE_REJ=$(_field "consecutive_rejections" "0")
 HITL_THRESHOLD=$(_field "hitl_threshold" "5")
 COMPLETION_PROMISE=$(_field "completion_promise" "COMPLETE")
 ACTIVE=$(_field "active" "true")
+AUTONOMOUS=$(_field "autonomous" "false")
+BRANCH=$(_field "branch" "")
+BASE_BRANCH=$(_field "base_branch" "main")
 
 # Validate numerics
 [[ "$ITERATION" =~ ^[0-9]+$ ]]       || ITERATION=1
@@ -63,6 +72,7 @@ ACTIVE=$(_field "active" "true")
 
 # ── 4. HITL pause check ───────────────────────────────────────────
 if [[ "$ACTIVE" == "false" ]]; then
+  # Autonomous mode never sets active: false, so this only triggers in HITL mode
   echo "[gulf-loop] Loop is paused (HITL gate). Check JUDGE_FEEDBACK.md." >&2
   echo "  To resume: edit RUBRIC.md then run /gulf-loop:resume" >&2
   echo "  To cancel: run /gulf-loop:cancel" >&2
@@ -88,6 +98,8 @@ FRAMEWORK=$(cat "${PLUGIN_ROOT}/prompts/framework.md" 2>/dev/null || echo "")
 FRAMEWORK="${FRAMEWORK//\{ITERATION\}/$((ITERATION + 1))}"
 FRAMEWORK="${FRAMEWORK//\{MAX_ITERATIONS\}/$MAX_ITERATIONS}"
 FRAMEWORK="${FRAMEWORK//\{COMPLETION_PROMISE\}/$COMPLETION_PROMISE}"
+FRAMEWORK="${FRAMEWORK//\{BRANCH\}/$BRANCH}"
+FRAMEWORK="${FRAMEWORK//\{BASE_BRANCH\}/$BASE_BRANCH}"
 
 if [[ -z "$(echo "$PROMPT" | tr -d '[:space:]')" ]]; then
   echo "[gulf-loop] ERROR: Empty prompt body in $STATE_FILE. Stopping." >&2
@@ -95,7 +107,7 @@ if [[ -z "$(echo "$PROMPT" | tr -d '[:space:]')" ]]; then
   exit 0
 fi
 
-# Helper: update a frontmatter field in-place
+# ── Helper: update a frontmatter field in-place ───────────────────
 _update_field() {
   local field="$1" value="$2"
   awk -v f="$field" -v v="$value" '
@@ -104,11 +116,107 @@ _update_field() {
   ' "$STATE_FILE" > "${STATE_FILE}.tmp" && mv "${STATE_FILE}.tmp" "$STATE_FILE"
 }
 
-# Helper: emit block decision
+# ── Helper: emit block decision ───────────────────────────────────
 _block() {
   local reason="$1" sys_msg="$2"
   jq -n --arg r "$reason" --arg s "$sys_msg" \
     '{"decision":"block","reason":$r,"systemMessage":$s}'
+}
+
+# ── Helper: autonomous merge ──────────────────────────────────────
+# Called when the loop is complete in autonomous mode.
+# Acquires a flock, rebases on base branch, runs autochecks, merges.
+# On conflict or test failure: re-injects with resolution instructions.
+_try_merge() {
+  local MERGE_LOCK="${HOME}/.claude/gulf-merge.lock"
+  mkdir -p "$(dirname "$MERGE_LOCK")"
+
+  # Detect worktree vs main repo
+  local GIT_COMMON IN_WORKTREE MAIN_REPO
+  GIT_COMMON=$(git rev-parse --git-common-dir 2>/dev/null || echo ".git")
+  if [[ "$GIT_COMMON" == ".git" ]]; then
+    IN_WORKTREE=false
+    MAIN_REPO=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+  else
+    IN_WORKTREE=true
+    MAIN_REPO=$(echo "$GIT_COMMON" | sed 's|/.git$||')
+  fi
+
+  # Try to acquire merge lock (non-blocking)
+  exec 9>"$MERGE_LOCK"
+  if ! flock -n 9; then
+    # Another worker is currently merging — continue loop and retry
+    echo "[gulf-loop] Merge lock held by another worker. Will retry next iteration." >&2
+    _update_field "iteration" "$NEXT"
+    _block \
+      "$(printf '%s\n\n---\n## Merge Queued\n\nAnother worker is currently merging into `%s`.\nThe loop will continue and retry the merge after the next iteration.\nYou may do further polishing work, or simply output the completion signal again.\n---\n\n%s' \
+        "$PROMPT" "$BASE_BRANCH" "$FRAMEWORK")" \
+      "Gulf Loop | Iter $NEXT/$MAX_ITERATIONS | Merge queued — waiting for lock"
+    return
+  fi
+
+  echo "[gulf-loop] Autonomous: attempting merge of $BRANCH → $BASE_BRANCH..." >&2
+
+  # Fetch latest base branch
+  git fetch origin "$BASE_BRANCH" 2>/dev/null || git fetch 2>/dev/null || true
+
+  # Rebase on base branch
+  local REBASE_OK=true
+  local CONFLICT_FILES=""
+  if ! git rebase "origin/${BASE_BRANCH}" 2>/dev/null && ! git rebase "$BASE_BRANCH" 2>/dev/null; then
+    REBASE_OK=false
+    CONFLICT_FILES=$(git diff --name-only --diff-filter=U 2>/dev/null | head -20 || echo "(unknown)")
+    git rebase --abort 2>/dev/null || true
+  fi
+
+  if [[ "$REBASE_OK" == "false" ]]; then
+    flock -u 9
+    _update_field "iteration" "$NEXT"
+    _block \
+      "$(printf '%s\n\n---\n## ⚠️ Merge Conflict — Autonomous Resolution Required\n\nYour branch (`%s`) conflicts with `%s` on:\n\n```\n%s\n```\n\n### Resolution instructions\n\n1. Study both sides: `git log %s..HEAD` and `git log HEAD..origin/%s`\n2. Implement merged logic that preserves the intent of BOTH sides.\n3. Write or update tests covering the merged behavior.\n4. Verify all existing tests pass.\n5. Commit: `git add -A && git commit -m \"fix: resolve merge conflict with %s\"`\n6. Output the completion signal — merge is retried automatically.\n\n**Priority: logic correctness > test coverage > style.**\nNever discard one side's changes without understanding them.\n---\n\n%s' \
+        "$PROMPT" \
+        "$BRANCH" "$BASE_BRANCH" "$CONFLICT_FILES" \
+        "$BASE_BRANCH" "$BASE_BRANCH" "$BASE_BRANCH" \
+        "$FRAMEWORK")" \
+      "Gulf Loop | Iter $NEXT/$MAX_ITERATIONS | Merge CONFLICT — resolve autonomously"
+    return
+  fi
+
+  # Rebase clean — run autochecks if present
+  local AUTOCHECK_SCRIPT=".claude/autochecks.sh"
+  if [[ -f "$AUTOCHECK_SCRIPT" && -x "$AUTOCHECK_SCRIPT" ]]; then
+    local AUTOCHECK_OUTPUT AUTOCHECK_EXIT
+    if AUTOCHECK_OUTPUT=$("$AUTOCHECK_SCRIPT" 2>&1); then
+      AUTOCHECK_EXIT=0
+    else
+      AUTOCHECK_EXIT=$?
+    fi
+
+    if [[ $AUTOCHECK_EXIT -ne 0 ]]; then
+      flock -u 9
+      _update_field "iteration" "$NEXT"
+      _block \
+        "$(printf '%s\n\n---\n## ⚠️ Post-Rebase Tests Failed\n\nSuccessfully rebased on `%s` but autochecks failed:\n\n```\n%s\n```\n\nFix the failures, then output the completion signal again.\n---\n\n%s' \
+          "$PROMPT" "$BASE_BRANCH" "$AUTOCHECK_OUTPUT" "$FRAMEWORK")" \
+        "Gulf Loop | Iter $NEXT/$MAX_ITERATIONS | Rebase OK — tests FAILED"
+      return
+    fi
+  fi
+
+  # All clear — do the merge
+  local MERGE_MSG="merge(gulf-loop): $BRANCH → $BASE_BRANCH [autonomous]"
+  if [[ "$IN_WORKTREE" == "true" ]]; then
+    git -C "$MAIN_REPO" merge --no-ff "$BRANCH" -m "$MERGE_MSG"
+  else
+    git checkout "$BASE_BRANCH"
+    git merge --no-ff "$BRANCH" -m "$MERGE_MSG"
+    git branch -d "$BRANCH" 2>/dev/null || true
+  fi
+
+  flock -u 9
+  echo "[gulf-loop] Autonomous: merged $BRANCH → $BASE_BRANCH successfully." >&2
+  rm -f "$STATE_FILE"
+  exit 0
 }
 
 # ── 7. Increment iteration ────────────────────────────────────────
@@ -130,7 +238,6 @@ if [[ "$JUDGE_ENABLED" == "true" ]]; then
   fi
 
   if [[ $AUTOCHECK_EXIT -ne 0 ]]; then
-    # Auto-checks failed → re-inject with failure info, no judge
     _update_field "iteration" "$NEXT"
 
     FULL_REASON="$(printf '%s\n\n---\n## Auto-check Failures (fix before continuing)\n%s\n---\n\n%s' \
@@ -145,10 +252,13 @@ if [[ "$JUDGE_ENABLED" == "true" ]]; then
   JUDGE_OUTPUT=$("${PLUGIN_ROOT}/scripts/run-judge.sh" 2>/dev/null) || JUDGE_OUTPUT="APPROVED"
 
   if echo "$JUDGE_OUTPUT" | grep -q "^APPROVED"; then
-    # Judge approved → loop complete
-    echo "[gulf-loop] Judge APPROVED after $ITERATION iteration(s). Loop complete." >&2
-    rm -f "$STATE_FILE"
-    exit 0
+    if [[ "$AUTONOMOUS" == "true" && -n "$BRANCH" ]]; then
+      _try_merge
+    else
+      echo "[gulf-loop] Judge APPROVED after $ITERATION iteration(s). Loop complete." >&2
+      rm -f "$STATE_FILE"
+      exit 0
+    fi
   fi
 
   # 8c. Judge rejected
@@ -166,16 +276,28 @@ if [[ "$JUDGE_ENABLED" == "true" ]]; then
     echo "$REJECTION_REASON"
   } >> "JUDGE_FEEDBACK.md"
 
-  # Update state
   _update_field "iteration" "$NEXT"
   _update_field "consecutive_rejections" "$NEXT_CONSEC"
 
-  # Check HITL threshold
+  # Check HITL / strategy-reset threshold
   if [[ "$NEXT_CONSEC" -ge "$HITL_THRESHOLD" ]]; then
-    echo "[gulf-loop] HITL gate: Judge rejected $NEXT_CONSEC consecutive time(s). Loop paused." >&2
-    echo "  Review JUDGE_FEEDBACK.md, update RUBRIC.md if needed, then resume." >&2
-    _update_field "active" "false"
-    exit 0
+    if [[ "$AUTONOMOUS" == "true" ]]; then
+      # Autonomous: strategy reset instead of HITL pause
+      echo "[gulf-loop] Autonomous: $NEXT_CONSEC consecutive rejections — strategy reset." >&2
+      _update_field "consecutive_rejections" "0"
+
+      FULL_REASON="$(printf '%s\n\n---\n## ⚠️ Strategy Reset (%s consecutive rejections)\n\nThe current approach has been rejected %s times in a row.\nThis is a signal to fundamentally rethink — not iterate on the same approach.\n\nReview JUDGE_FEEDBACK.md: identify the root pattern across all rejections.\nChoose a different architecture, algorithm, or implementation strategy.\n\nDo NOT continue with variations of what you have been doing.\n---\n\n%s' \
+        "$PROMPT" "$NEXT_CONSEC" "$NEXT_CONSEC" "$FRAMEWORK")"
+
+      _block "$FULL_REASON" \
+        "Gulf Loop | Iter $NEXT/$MAX_ITERATIONS | STRATEGY RESET — rethink approach"
+      exit 0
+    else
+      echo "[gulf-loop] HITL gate: Judge rejected $NEXT_CONSEC consecutive time(s). Loop paused." >&2
+      echo "  Review JUDGE_FEEDBACK.md, update RUBRIC.md if needed, then resume." >&2
+      _update_field "active" "false"
+      exit 0
+    fi
   fi
 
   # Continue loop with judge feedback injected
@@ -196,31 +318,33 @@ else
   PROMISE_TAG="<promise>${COMPLETION_PROMISE}</promise>"
 
   if echo "$LAST_MSG" | grep -qF "$PROMISE_TAG"; then
-    # Promise found — run .claude/autochecks.sh if it exists
     AUTOCHECK_SCRIPT=".claude/autochecks.sh"
     if [[ -f "$AUTOCHECK_SCRIPT" && -x "$AUTOCHECK_SCRIPT" ]]; then
       echo "[gulf-loop] Promise found. Running autochecks before accepting..." >&2
       if AUTOCHECK_OUTPUT=$("$AUTOCHECK_SCRIPT" 2>&1); then
-        echo "[gulf-loop] Autochecks passed. Loop complete after $ITERATION iteration(s)." >&2
-        rm -f "$STATE_FILE"
-        exit 0
+        if [[ "$AUTONOMOUS" == "true" && -n "$BRANCH" ]]; then
+          _try_merge
+        else
+          echo "[gulf-loop] Autochecks passed. Loop complete after $ITERATION iteration(s)." >&2
+          rm -f "$STATE_FILE"
+          exit 0
+        fi
       else
-        # Autochecks failed — reject the completion claim, re-inject with failure info
-        echo "[gulf-loop] Promise found but autochecks FAILED. Continuing loop." >&2
         _update_field "iteration" "$NEXT"
-
         FULL_REASON="$(printf '%s\n\n---\n## ⚠️ Completion Rejected — Autochecks Failed\n\nYou output the completion signal but the following checks failed:\n\n```\n%s\n```\n\nFix the failures above, then output the completion signal again.\n---\n\n%s' \
           "$PROMPT" "$AUTOCHECK_OUTPUT" "$FRAMEWORK")"
-
         _block "$FULL_REASON" \
           "Gulf Loop | Iter $NEXT/$MAX_ITERATIONS | Promise REJECTED — autochecks failed"
         exit 0
       fi
     else
-      # No autochecks script — trust the promise
-      echo "[gulf-loop] Completion promise found. Loop complete after $ITERATION iteration(s)." >&2
-      rm -f "$STATE_FILE"
-      exit 0
+      if [[ "$AUTONOMOUS" == "true" && -n "$BRANCH" ]]; then
+        _try_merge
+      else
+        echo "[gulf-loop] Completion promise found. Loop complete after $ITERATION iteration(s)." >&2
+        rm -f "$STATE_FILE"
+        exit 0
+      fi
     fi
   fi
 

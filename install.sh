@@ -115,13 +115,25 @@ install_commands() {
     "PROMPT [--max-iterations N] [--hitl-threshold N]" \
     "setup-judge.sh"
 
+  _write_command "gulf-loop:start-autonomous" \
+    "Start a fully autonomous Gulf Loop — no HITL, branch-based, auto-merges on completion" \
+    "PROMPT [--max-iterations N] [--base-branch BRANCH] [--with-judge] [--hitl-threshold N]" \
+    "setup-autonomous.sh"
+
+  _write_command "gulf-loop:start-parallel" \
+    "Set up N parallel autonomous Gulf Loops in separate git worktrees" \
+    "PROMPT --workers N [--max-iterations N] [--base-branch BRANCH] [--with-judge]" \
+    "setup-parallel.sh"
+
   _write_simple_command "gulf-loop:cancel"  "Cancel the active Gulf Loop"                              "cancel-loop.sh"
   _write_simple_command "gulf-loop:status"  "Show current Gulf Loop iteration status"                  "status-loop.sh"
   _write_simple_command "gulf-loop:resume"  "Resume a Gulf Loop paused by the HITL gate"              "resume-loop.sh"
 
-  ok "5 slash commands → $COMMANDS_DIR"
+  ok "7 slash commands → $COMMANDS_DIR"
   echo "    /gulf-loop:start"
   echo "    /gulf-loop:start-with-judge"
+  echo "    /gulf-loop:start-autonomous"
+  echo "    /gulf-loop:start-parallel"
   echo "    /gulf-loop:cancel"
   echo "    /gulf-loop:status"
   echo "    /gulf-loop:resume"
@@ -236,9 +248,13 @@ verify() {
   _check "${INSTALL_DIR}/hooks/stop-hook.sh"
   _check "${INSTALL_DIR}/scripts/setup-loop.sh"
   _check "${INSTALL_DIR}/scripts/setup-judge.sh"
+  _check "${INSTALL_DIR}/scripts/setup-autonomous.sh"
+  _check "${INSTALL_DIR}/scripts/setup-parallel.sh"
   _check "${INSTALL_DIR}/prompts/framework.md"
   _check "${COMMANDS_DIR}/gulf-loop:start.md"
   _check "${COMMANDS_DIR}/gulf-loop:start-with-judge.md"
+  _check "${COMMANDS_DIR}/gulf-loop:start-autonomous.md"
+  _check "${COMMANDS_DIR}/gulf-loop:start-parallel.md"
 
   if [[ $fail_count -gt 0 ]]; then
     err "$fail_count check(s) failed."
