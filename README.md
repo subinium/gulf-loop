@@ -373,25 +373,28 @@ flowchart TD
         GH["git history\nFactual Memory\nAudit trail · checkpoints"]
     end
 
-    subgraph GV["Gulf of Evaluation"]
+    subgraph GV["Gulf of Evaluation — judge mode"]
         RUBRIC["RUBRIC.md\nChecks · Criteria"]
         G1{"Checks Gate\nFast fail → re-inject\nPass → LLM evidence"}
         G2{"Judge\nChecks output + Source → LLM"}
-        G3{"Gate 3\nHITL\nor strategy reset"}
+        G3{"HITL or strategy reset"}
     end
 
-    OUT(["Done\nBranch merged"])
+    OUT_B(["Done\nbasic mode"])
+    OUT_J(["Done\nautonomous: + branch merged"])
 
     USER --> ALIGN
     ALIGN -.->|"saves"| GA
-    USER --> PROMPT & RUBRIC
+    USER --> PROMPT
+    USER -.->|"judge mode"| RUBRIC
     PROMPT --> FRAMEWORK --> P0
     RUBRIC --> G1 & G2
 
-    SIG --> G1
+    SIG -->|"basic: promise found"| OUT_B
+    SIG -->|"judge mode"| G1
     G1 -->|"pass"| G2
     G1 -->|"fail + details"| P0
-    G2 -->|"APPROVED"| OUT
+    G2 -->|"APPROVED"| OUT_J
     G2 -->|"REJECTED"| G3
     G3 -->|"feedback re-injected"| P0
 

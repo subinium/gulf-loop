@@ -380,25 +380,28 @@ flowchart TD
         GH["git history\nFactual Memory\n감사 추적 · 체크포인트"]
     end
 
-    subgraph GV["평가 차 — Gulf of Evaluation"]
+    subgraph GV["평가 차 — judge 모드"]
         RUBRIC["RUBRIC.md\nChecks · Criteria"]
         G1{"Checks 게이트\n실패 → 재주입\n통과 → LLM 증거"}
         G2{"Judge\nChecks 출력 + Source → LLM"}
-        G3{"Gate 3\nHITL\n또는 전략 리셋"}
+        G3{"HITL 또는 전략 리셋"}
     end
 
-    OUT(["완료\n브랜치 Merge"])
+    OUT_B(["완료\n기본 모드"])
+    OUT_J(["완료\n자율 모드: + 브랜치 Merge"])
 
     USER --> ALIGN
     ALIGN -.->|"저장"| GA
-    USER --> PROMPT & RUBRIC
+    USER --> PROMPT
+    USER -.->|"judge 모드"| RUBRIC
     PROMPT --> FRAMEWORK --> P0
     RUBRIC --> G1 & G2
 
-    SIG --> G1
+    SIG -->|"기본: 완료 신호 감지"| OUT_B
+    SIG -->|"judge 모드"| G1
     G1 -->|"통과"| G2
     G1 -->|"실패 + 상세"| P0
-    G2 -->|"APPROVED"| OUT
+    G2 -->|"APPROVED"| OUT_J
     G2 -->|"REJECTED"| G3
     G3 -->|"피드백 재주입"| P0
 
