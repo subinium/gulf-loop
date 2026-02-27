@@ -17,21 +17,28 @@ Initialize judge-enabled loop. Requires `RUBRIC.md` in the project root.
 
 ## How judge mode works
 
-Completion in this mode requires **two gates** in sequence:
+Completion in this mode requires **two stages** in sequence:
 
 ```
 Every iteration
       │
       ▼
 [Gate 1] Auto-checks (RUBRIC.md ## Auto-checks)
-      │  All pass?
-      ├── No  → re-inject with failure details
+      │  All exit 0? Fast structural gate — lint, types, tests.
+      ├── No  → re-inject with failure details (no Opus API call)
       └── Yes ▼
-[Gate 2] Claude Opus Judge (RUBRIC.md ## Judge criteria)
+[Gate 2] Behavioral Judge
+      │  1. Execute ## Behavioral contracts → collect exit codes + output
+      │  2. Read changed source files (actual content, not diff)
+      │  3. Claude Opus evaluates with behavioral evidence + ## Judge criteria
       │  APPROVED?
       ├── No  → append to JUDGE_FEEDBACK.md, re-inject with reason
       └── Yes → loop ends
 ```
+
+**Key difference from diff-based evaluation**: the judge sees what the code *actually does*
+(contract execution results) and what it *currently is* (source files), not just what changed.
+This catches behavioral regressions, silent failures, and interface violations that diffs miss.
 
 **HITL gate**: after N consecutive Judge rejections, the loop pauses.
 Review `JUDGE_FEEDBACK.md`, update `RUBRIC.md` if needed, then run `/gulf-loop:resume`.
@@ -81,8 +88,14 @@ model: claude-opus-4-6    # judge model (haiku / sonnet / opus)
 hitl_threshold: 5         # consecutive rejections before HITL pause
 ---
 
-## Auto-checks
+## Behavioral contracts
+# Executed by the judge — exit code + output becomes LLM evidence.
+# Use commands that produce meaningful output on failure.
 - npm test
+- node -e "const {fn} = require('./src'); process.exit(fn(null) === false ? 0 : 1)"
+
+## Auto-checks
+# Fast gate before judge call — if any fail, judge is not invoked.
 - npx tsc --noEmit
 - npm run lint
 

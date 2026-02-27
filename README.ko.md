@@ -229,12 +229,15 @@ N번 연속 거절은 두 가지 중 하나를 의미한다:
 
 ### 원칙 3: "완료"를 사전에 정의한다
 
-암묵적인 완료 기준이 평가 차의 원인이다. RUBRIC.md는 이 정의를 두 층으로 나눈다:
+암묵적인 완료 기준이 평가 차의 원인이다. RUBRIC.md는 이 정의를 세 층으로 나눈다:
 
-- **Auto-checks**: 기계가 판단할 수 있는 객관적 기준 (테스트, 타입 체크, 린트)
-- **Judge criteria**: 기계가 판단하기 어려운 주관적 기준 (단일 책임, 에러 처리 방식)
+- **Auto-checks**: judge 호출 전 빠른 구조적 게이트 (테스트, 타입 체크, 린트) — 종료 코드만 확인
+- **Behavioral contracts**: judge *내부*에서 실행되는 쉘 명령어 — LLM이 출력을 해석하는 행동적 증거. "코드가 무엇을 *하는가*"를 확인
+- **Judge criteria**: 행동적 증거 + 소스 파일을 바탕으로 LLM이 평가하는 자연어 요건
 
-객관적 기준이 통과해야 주관적 기준 평가로 넘어간다. 순서가 있다. 기계가 판단할 수 있는 것은 기계에게 먼저 맡긴다.
+각 층은 서로 다른 실패 모드를 잡아낸다. Auto-checks는 구조적 파손을 저렴하게 잡는다. Behavioral contracts는 테스트가 놓치는 인터페이스 위반과 조용한 실패를 잡는다. Judge criteria는 어느 기계도 직접 관찰할 수 없는 설계 수준의 문제를 잡는다.
+
+순서가 있다. 구조적 검사는 기계에게, 행동적 증거는 두 번째로, 해석적 판단은 마지막에.
 
 ### 원칙 4: 평가 이력은 영속적이어야 한다
 
@@ -291,8 +294,13 @@ model: claude-opus-4-6
 hitl_threshold: 5
 ---
 
-## Auto-checks
+## Behavioral contracts
+# judge 내부에서 실행 — 출력이 LLM 증거가 됨.
 - npm test
+- node -e "const {validate} = require('./src/validate'); process.exit(validate(null) === false ? 0 : 1)"
+
+## Auto-checks
+# judge 호출 전 빠른 구조적 게이트.
 - npx tsc --noEmit
 - npm run lint
 
@@ -301,7 +309,7 @@ hitl_threshold: 5
 - 에러 처리는 명시적이다 — 조용한 실패나 빈 catch 블록이 없다.
 ```
 
-Auto-checks는 종료 코드로 판단한다. 모호함이 없다. Judge criteria는 LLM이 판단한다. 기계가 판단할 수 있는 것은 기계에게, 판단이 필요한 것은 판단하는 주체에게 맡긴다.
+judge는 코드 diff가 아니라 행동적 증거(계약 실행 결과 + 소스 파일)를 기반으로 평가한다. diff 기반 평가가 놓치는 인터페이스 위반과 조용한 실패를 잡아낸다. Judge criteria는 그 증거 위에서 평가되는 자연어 층이다.
 
 ### JUDGE_FEEDBACK.md — Reflexion 메모리
 
@@ -377,9 +385,9 @@ flowchart TD
     end
 
     subgraph GV["평가 차 — Gulf of Evaluation"]
-        RUBRIC["RUBRIC.md\nAuto-checks · Judge criteria"]
-        G1{"Gate 1\n객관적\nAuto-checks"}
-        G2{"Gate 2\n주관적\nOpus Judge"}
+        RUBRIC["RUBRIC.md\nContracts · Auto-checks · Criteria"]
+        G1{"Gate 1\n구조적\nAuto-checks"}
+        G2{"Gate 2\n행동적 Judge\nContracts + Source → LLM"}
         G3{"Gate 3\nHITL\n또는 전략 리셋"}
     end
 
@@ -662,7 +670,7 @@ cd gulf-loop
 | 완료 판정 주체 | 작업 에이전트 본인 | 별도 Opus judge (judge 모드) |
 | 루프 패턴 | ReAct | ReAct + Reflexion |
 | 실행 차 대응 | 없음 | Phase 프레임워크 + 언어 트리거 매 반복 주입 |
-| 평가 차 대응 | 완료 약속만 | RUBRIC.md + judge + JUDGE_FEEDBACK.md |
+| 평가 차 대응 | 완료 약속만 | RUBRIC.md + behavioral contracts + judge + JUDGE_FEEDBACK.md |
 | 메모리 구조 | 없음 | 3축 메모리 (Working/Experiential/Factual) |
 | HITL | 없음 | 핵심 설계 — 평가 수렴 실패 시 인간에게 제어권 |
 | 자율 모드 | 없음 | 브랜치 기반, 자동 merge, 전략 리셋 |

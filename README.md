@@ -213,12 +213,15 @@ Both are **judgments that cannot be automated**. The HITL gate triggering is nor
 
 ### Principle 3: Define "done" before you start
 
-Implicit completion criteria are the cause of evaluation gaps. RUBRIC.md defines this in two layers:
+Implicit completion criteria are the cause of evaluation gaps. RUBRIC.md defines this in three layers:
 
-- **Auto-checks**: objective criteria the machine can judge (tests, type checks, lint)
-- **Judge criteria**: subjective criteria that require judgment (single responsibility, error handling style)
+- **Auto-checks**: fast structural gate run before the judge (tests, type checks, lint) — exit code only
+- **Behavioral contracts**: shell commands executed *inside* the judge, whose output the LLM interprets — what the code *does*, not just whether it compiles
+- **Judge criteria**: natural-language requirements the LLM evaluates against behavioral evidence + source
 
-Objective criteria must pass before subjective criteria are evaluated. Order matters. Give to the machine what the machine can judge first.
+Each layer catches different failure modes. Auto-checks catch structural breakage cheaply. Behavioral contracts catch interface violations and silent failures that tests miss. Judge criteria catch design-level problems that neither machine can directly observe.
+
+Order matters: give structural checks to the machine first, behavioral evidence second, interpretive judgment last.
 
 ### Principle 4: Evaluation history must persist
 
@@ -277,8 +280,13 @@ model: claude-opus-4-6
 hitl_threshold: 5
 ---
 
-## Auto-checks
+## Behavioral contracts
+# Executed by the judge — exit code + output becomes LLM evidence.
 - npm test
+- node -e "const {validate} = require('./src/validate'); process.exit(validate(null) === false ? 0 : 1)"
+
+## Auto-checks
+# Fast gate run before judge — structural checks only.
 - npx tsc --noEmit
 - npm run lint
 
@@ -287,7 +295,7 @@ hitl_threshold: 5
 - Error handling is explicit — no silent failures or empty catch blocks.
 ```
 
-Auto-checks use exit codes. No ambiguity. Judge criteria are evaluated by the LLM. Give to the machine what the machine can judge; give to judgment what requires judgment.
+The judge evaluates behavioral evidence (contract execution results + source files), not code diffs. This catches interface violations and silent failures that diff-based evaluation misses. Judge criteria are the natural-language layer evaluated on top of that evidence.
 
 ### JUDGE_FEEDBACK.md — Reflexion memory
 
@@ -371,9 +379,9 @@ flowchart TD
     end
 
     subgraph GV["Gulf of Evaluation"]
-        RUBRIC["RUBRIC.md\nAuto-checks · Judge criteria"]
-        G1{"Gate 1\nObjective\nAuto-checks"}
-        G2{"Gate 2\nSubjective\nOpus Judge"}
+        RUBRIC["RUBRIC.md\nContracts · Auto-checks · Criteria"]
+        G1{"Gate 1\nStructural\nAuto-checks"}
+        G2{"Gate 2\nBehavioral Judge\nContracts + Source → LLM"}
         G3{"Gate 3\nHITL\nor strategy reset"}
     end
 
@@ -450,9 +458,12 @@ Stop event
 ```
 Stop event
   ├── [Gate 1] Run RUBRIC.md ## Auto-checks
-  │     Any fail → re-inject with failure details
+  │     Any fail → re-inject with failure details (no Opus call)
   │     All pass ↓
-  ├── [Gate 2] Claude Opus evaluates RUBRIC.md ## Judge criteria
+  ├── [Gate 2] Behavioral Judge
+  │     Execute ## Behavioral contracts → collect exit codes + output
+  │     Read changed source files (actual content, not diff)
+  │     Claude Opus evaluates: evidence + ## Judge criteria
   │     APPROVED → stop (or _try_merge if autonomous)
   │     REJECTED → write JUDGE_FEEDBACK.md, re-inject with reason
   │     N consecutive rejections → HITL pause (or strategy reset if autonomous)
@@ -707,8 +718,14 @@ hitl_threshold: 5
 ## Envisioning
 <!-- Optional. Filled by /gulf-loop:align. -->
 
-## Auto-checks
+## Behavioral contracts
+# Executed inside the judge — output becomes LLM evidence.
+# Use commands that produce meaningful output when they fail.
 - npm test
+- node -e "const {fn} = require('./src'); process.exit(fn(null) === false ? 0 : 1)"
+
+## Auto-checks
+# Fast gate before judge call — structural checks only.
 - npx tsc --noEmit
 - npm run lint
 
@@ -734,7 +751,7 @@ Same Stop hook architecture. ralph-wiggum's core is a 96-line stop hook — dete
 | Completion arbiter | Working agent itself | Separate Opus judge (judge mode) |
 | Loop pattern | ReAct | ReAct + Reflexion |
 | Gulf of Execution | None | Phase framework + language triggers every iteration |
-| Gulf of Evaluation | Completion promise only | RUBRIC.md + judge + JUDGE_FEEDBACK.md |
+| Gulf of Evaluation | Completion promise only | RUBRIC.md + behavioral contracts + judge + JUDGE_FEEDBACK.md |
 | Gulf of Envisioning | None | `/gulf-loop:align` + gulf-align.md |
 | Memory structure | None | 4-layer (Alignment/Working/Experiential/Factual) |
 | HITL | None | Core design — hands control to human when evaluation diverges |

@@ -22,10 +22,28 @@ Design choices with multiple valid answers that the agent must decide.
 
 ---
 
+## Behavioral contracts
+
+Shell commands executed **inside** the judge evaluation as behavioral evidence.
+Each line starting with `- ` is run; exit code + stdout/stderr are fed to the LLM judge.
+All must exit 0 for the judge to APPROVE.
+
+Unlike Auto-checks (which are a fast gate), behavioral contracts give the LLM judge
+interpretable evidence: *why* a test failed, what a function actually returned, whether
+an endpoint responded as specified. Use commands that produce meaningful output on failure.
+
+<!-- Examples:
+- npm test
+- node -e "const {validate} = require('./src/validate'); process.exit(validate(null) === false ? 0 : 1)"
+- curl -sf http://localhost:3000/health | grep -q '"status":"ok"'
+- node -e "const {fn} = require('./src'); const r = fn([]); console.log(r); process.exit(Array.isArray(r) ? 0 : 1)"
+-->
+
 ## Auto-checks
 
-Commands that must all exit 0 before the Judge is invoked.
+Commands that must all exit 0 **before** the Judge is invoked (fast structural gate).
 Each line starting with `- ` is executed as a shell command.
+If any fail, the loop re-injects immediately without spending API credits on the judge.
 
 - npm test
 - npx tsc --noEmit

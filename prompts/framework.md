@@ -154,6 +154,9 @@ Output the completion signal **only** when ALL of the following are machine-veri
   ⚠️ If no tests exist: explicitly state this AND perform an alternative runtime check (e.g. `npm run build`, start the server, hit an endpoint). Do NOT treat "no tests" as "tests pass".
 - [ ] **Type check** — `tsc --noEmit` / `mypy` / `cargo check` exits 0.
 - [ ] **Lint** — `npm run lint` / `ruff` / `clippy` exits 0.
+- [ ] **Behavioral contracts** — If `RUBRIC.md` has a `## Behavioral contracts` section,
+  run each `- command` locally before outputting the signal. All must exit 0.
+  These are the same commands the judge will execute — verify them yourself first.
 - [ ] **Runtime** — If the project produces a runnable artifact (server, desktop app, CLI), you MUST verify it actually starts without crashing. Show the command and its output.
 - [ ] **No placeholders** — No TODO, stub, or unimplemented functions remain.
 - [ ] **`progress.txt`** — Reflects all completed work and any known limitations.

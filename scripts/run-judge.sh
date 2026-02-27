@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
-# run-judge.sh — Call Claude Opus as LLM judge against RUBRIC.md criteria.
+# run-judge.sh — Execution-first judge for Gulf Loop
 #
-# Reads:   RUBRIC.md (## Judge criteria section)
+# Architecture:
+#   1. Run RUBRIC.md ## Behavioral contracts (shell commands → exit 0/1 + output)
+#   2. Read changed source files (not diff — actual current content)
+#   3. LLM judge evaluates behavioral evidence + criteria → APPROVED/REJECTED
+#
+# Reads:   RUBRIC.md (## Behavioral contracts, ## Judge criteria)
 # Env:     GULF_BASE_BRANCH — if set, evaluates all changes since diverging from this branch
-#                             (passed by stop-hook.sh in autonomous/judge mode)
-# Input:   cumulative diff from base branch, or HEAD~1 diff as fallback
 # Output:  "APPROVED" or "REJECTED: [reason]" to stdout
 # Exit:    always 0 (caller handles logic)
 #
@@ -31,118 +34,183 @@ MODEL=$(awk '
 ' "$RUBRIC_FILE")
 MODEL="${MODEL:-claude-opus-4-6}"
 
-# ── 3. Extract judge criteria section ────────────────────────────
-CRITERIA=$(awk '
-  /^## Judge criteria/ { in_section=1; next }
-  in_section && /^## / { exit }
-  in_section { print }
-' "$RUBRIC_FILE" | sed '/^[[:space:]]*$/d')
+# ── 3. Extract sections from RUBRIC.md ───────────────────────────
+_section() {
+  local header="$1"
+  awk -v hdr="$header" '
+    $0 ~ "^## "hdr { in_section=1; next }
+    in_section && /^## / { exit }
+    in_section { print }
+  ' "$RUBRIC_FILE" | sed '/^[[:space:]]*$/d'
+}
 
-if [[ -z "$CRITERIA" ]]; then
+CONTRACTS=$(_section "Behavioral contracts")
+CRITERIA=$(_section "Judge criteria")
+
+# Need at least one of them to do anything
+if [[ -z "$CONTRACTS" && -z "$CRITERIA" ]]; then
   echo "APPROVED"
   exit 0
 fi
 
-# ── 4. Determine evaluation scope ────────────────────────────────
-#
-# Priority:
-#   1. GULF_BASE_BRANCH env var (set by stop-hook.sh in autonomous/judge mode)
-#   2. Upstream tracking branch (regular judge mode on a tracked branch)
-#   3. HEAD~1 fallback
-#
-SCOPE_DESC=""
-MERGE_BASE=""
+# ── 4. Run behavioral contracts ────────────────────────────────────
+# Each "- command" line is executed as a shell command.
+# Results (pass/fail + output) become evidence for the LLM judge.
+# The LLM sees the actual output — not just exit codes — enabling
+# interpretive feedback ("test returned undefined, expected false").
+CONTRACT_RESULTS=""
+ALL_CONTRACTS_PASSED=true
+CONTRACT_COUNT=0
+FAIL_COUNT=0
+
+if [[ -n "$CONTRACTS" ]]; then
+  while IFS= read -r line; do
+    [[ "$line" =~ ^-[[:space:]] ]] || continue
+    CMD="${line#- }"
+    [[ -z "$CMD" ]] && continue
+    CONTRACT_COUNT=$((CONTRACT_COUNT + 1))
+
+    CONTRACT_OUTPUT=""
+    CONTRACT_EXIT=0
+    if CONTRACT_OUTPUT=$(eval "$CMD" 2>&1); then
+      CONTRACT_EXIT=0
+    else
+      CONTRACT_EXIT=$?
+      ALL_CONTRACTS_PASSED=false
+      FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+
+    # Truncate per-contract output to keep prompt manageable
+    if [[ ${#CONTRACT_OUTPUT} -gt 600 ]]; then
+      CONTRACT_OUTPUT="${CONTRACT_OUTPUT:0:600}
+... [output truncated at 600 chars]"
+    fi
+
+    STATUS="PASS"
+    [[ $CONTRACT_EXIT -ne 0 ]] && STATUS="FAIL (exit ${CONTRACT_EXIT})"
+
+    CONTRACT_RESULTS="${CONTRACT_RESULTS}### \`${CMD}\`
+Status: **${STATUS}**
+\`\`\`
+${CONTRACT_OUTPUT:-<no output>}
+\`\`\`
+
+"
+  done <<< "$CONTRACTS"
+fi
+
+# ── 5. Determine evaluation scope ────────────────────────────────
 BASE="${GULF_BASE_BRANCH:-}"
+MERGE_BASE=""
+SCOPE_DESC=""
 
 if [[ -n "$BASE" ]]; then
-  # Autonomous mode: evaluate everything since branching off BASE
   MERGE_BASE=$(git merge-base HEAD "origin/${BASE}" 2>/dev/null \
     || git merge-base HEAD "${BASE}" 2>/dev/null \
     || echo "")
-  if [[ -n "$MERGE_BASE" ]]; then
-    SCOPE_DESC="all changes since branching off \`${BASE}\`"
+  [[ -n "$MERGE_BASE" ]] && SCOPE_DESC="all changes since branching off \`${BASE}\`"
+fi
+
+if [[ -z "$MERGE_BASE" ]]; then
+  UPSTREAM=$(git rev-parse --abbrev-ref "@{upstream}" 2>/dev/null || echo "")
+  if [[ -n "$UPSTREAM" ]]; then
+    MERGE_BASE=$(git merge-base HEAD "$UPSTREAM" 2>/dev/null || echo "")
+    [[ -n "$MERGE_BASE" ]] && SCOPE_DESC="all changes since diverging from \`${UPSTREAM}\`"
   fi
 fi
 
 if [[ -z "$MERGE_BASE" ]]; then
-  # Try upstream tracking branch
-  UPSTREAM=$(git rev-parse --abbrev-ref "@{upstream}" 2>/dev/null || echo "")
-  if [[ -n "$UPSTREAM" ]]; then
-    MERGE_BASE=$(git merge-base HEAD "$UPSTREAM" 2>/dev/null || echo "")
-    if [[ -n "$MERGE_BASE" ]]; then
-      SCOPE_DESC="all changes since diverging from \`${UPSTREAM}\`"
+  SCOPE_DESC="last commit only"
+  MERGE_BASE="HEAD~1"
+fi
+
+# ── 6. Collect changed source files ───────────────────────────────
+# Judge reads actual source content (not diff) — behavioral truth over
+# implementation artifact. The LLM evaluates what the code IS, not the delta.
+EXCLUDES=(':(exclude)JUDGE_FEEDBACK.md' ':(exclude)progress.txt' ':(exclude).claude/')
+
+CHANGED_FILES=$(git diff --name-only "${MERGE_BASE}..HEAD" -- . "${EXCLUDES[@]}" 2>/dev/null \
+  | grep -v -E '\.(lock|sum|png|jpg|gif|svg|ico|woff|woff2|ttf|eot|pdf|zip|tar|gz|bin|exe)$' \
+  | head -20 || echo "")
+
+COMMIT_LOG=$(git log --oneline "${MERGE_BASE}..HEAD" 2>/dev/null | head -20 || echo "")
+
+SOURCE_SECTION=""
+SOURCE_BUDGET=8000
+SOURCE_USED=0
+
+if [[ -n "$CHANGED_FILES" ]]; then
+  SOURCE_SECTION="## Changed Source Files\n\nActual file contents — what the code currently IS.\n\n"
+  while IFS= read -r f; do
+    [[ -f "$f" ]] || continue
+    CONTENT=$(cat "$f" 2>/dev/null || echo "(unreadable)")
+    FSIZE=${#CONTENT}
+    if [[ $((SOURCE_USED + FSIZE)) -gt $SOURCE_BUDGET ]]; then
+      SOURCE_SECTION="${SOURCE_SECTION}### \`${f}\`\n(omitted — ${SOURCE_BUDGET}-char source budget reached)\n\n"
+      continue
     fi
+    SOURCE_USED=$((SOURCE_USED + FSIZE))
+    SOURCE_SECTION="${SOURCE_SECTION}### \`${f}\`\n\`\`\`\n${CONTENT}\n\`\`\`\n\n"
+  done <<< "$CHANGED_FILES"
+fi
+
+# ── 7. Short-circuit: if no LLM criteria, contracts alone decide ──
+if [[ -z "$CRITERIA" ]]; then
+  if [[ "$ALL_CONTRACTS_PASSED" == "true" ]]; then
+    echo "APPROVED"
+    exit 0
+  else
+    echo "REJECTED: ${FAIL_COUNT} of ${CONTRACT_COUNT} behavioral contract(s) failed. Fix all failing contracts before requesting judge approval."
+    exit 0
   fi
 fi
 
-# ── 5. Get code diff ──────────────────────────────────────────────
-EXCLUDES=(':(exclude)JUDGE_FEEDBACK.md' ':(exclude)progress.txt' ':(exclude).claude/')
-COMMIT_LOG=""
-
-if [[ -n "$MERGE_BASE" ]]; then
-  CODE_DIFF=$(git diff "${MERGE_BASE}..HEAD" -- . "${EXCLUDES[@]}" 2>/dev/null \
-    || echo "(no diff available)")
-  # Commit summary gives the judge context on what work was done
-  COMMIT_LOG=$(git log --oneline "${MERGE_BASE}..HEAD" 2>/dev/null | head -20 || echo "")
-else
-  # Fallback: last commit only
-  SCOPE_DESC="last commit only (no base branch detected)"
-  CODE_DIFF=$(git diff HEAD~1 -- . "${EXCLUDES[@]}" 2>/dev/null \
-    || git diff --cached -- . "${EXCLUDES[@]}" 2>/dev/null \
-    || echo "(no diff available — first commit or unstaged changes)")
-fi
-
-# ── 6. Truncate diff if too long ─────────────────────────────────
-# When truncated, also show which files were changed so the judge
-# knows the full scope even if it can't see all the code.
-DIFF_LIMIT=6000
-if [[ ${#CODE_DIFF} -gt $DIFF_LIMIT ]]; then
-  CHANGED_FILES=$(git diff --name-only "${MERGE_BASE:-HEAD~1}..HEAD" \
-    -- . "${EXCLUDES[@]}" 2>/dev/null | head -30 || echo "(unknown)")
-  CODE_DIFF="${CODE_DIFF:0:${DIFF_LIMIT}}
-
-... [diff truncated at ${DIFF_LIMIT} chars — full diff is ${#CODE_DIFF} chars]
-
-Files changed (complete list):
-${CHANGED_FILES}"
-fi
-
-# ── 7. Build judge prompt ─────────────────────────────────────────
+# ── 8. Build judge prompt ─────────────────────────────────────────
 COMMIT_SECTION=""
 if [[ -n "$COMMIT_LOG" ]]; then
-  COMMIT_SECTION="
-## Work Summary (git log)
+  COMMIT_SECTION="## Work Summary (git log)
 \`\`\`
 ${COMMIT_LOG}
 \`\`\`
+
 "
 fi
 
 JUDGE_PROMPT="You are a senior code reviewer running an automated quality gate.
 
-Evaluate the code changes below against EVERY criterion listed. Be strict.
-A criterion fails if it is even partially unmet.
+Evaluation scope: ${SCOPE_DESC}
 
-Evaluation scope: ${SCOPE_DESC:-last commit}
-${COMMIT_SECTION}
-## Criteria
+${COMMIT_SECTION}## Behavioral Contract Results
+
+${CONTRACT_RESULTS:-No behavioral contracts defined.}
+
+$(printf '%b' "${SOURCE_SECTION}")## Judge Criteria
+
 ${CRITERIA}
 
-## Code Changes
-\`\`\`diff
-${CODE_DIFF}
-\`\`\`
-
 ## Instructions
-- If ALL criteria are fully met: output exactly the word APPROVED on its own line.
-- If ANY criterion is unmet: output REJECTED: followed by a concise explanation
-  of which criteria failed and exactly what needs to change.
-- Do not output anything other than APPROVED or REJECTED: [reason].
-- Do not be lenient. An almost-passing criterion is a failing criterion.
-- If the diff is truncated, evaluate based on what you can see and note any
-  concerns about code you could not inspect."
 
-# ── 8. Call Claude judge ──────────────────────────────────────────
+Evaluate the implementation based on the evidence above.
+
+- Behavioral contract results show what the code **actually does** — these were executed and verified.
+  The output (not just the exit code) tells you what the behavior is.
+- Source files show **how** the code is implemented.
+- Judge criteria are additional natural-language requirements to evaluate.
+
+Decision rules:
+1. If ANY behavioral contract FAILED: output REJECTED — contracts are hard failures.
+2. If all contracts PASSED but a criterion is unmet: output REJECTED with the specific criterion.
+3. If all contracts PASSED and ALL criteria are fully met: output APPROVED.
+
+Output exactly one of:
+- \`APPROVED\` — if and only if all contracts pass AND all criteria are fully met.
+- \`REJECTED: [reason]\` — concise explanation of which contracts failed and/or which criteria are unmet.
+
+Do not output anything other than APPROVED or REJECTED: [reason].
+Be strict. An almost-passing criterion is a failing criterion.
+A failing contract is a hard failure regardless of criterion quality."
+
+# ── 9. Call Claude judge ──────────────────────────────────────────
 RESULT=$(printf '%s' "$JUDGE_PROMPT" \
   | claude --model "$MODEL" --print 2>/dev/null \
   || echo "APPROVED")  # Fail open: if claude CLI errors, don't block the loop
