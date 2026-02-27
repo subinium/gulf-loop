@@ -190,14 +190,38 @@ else
   # ────────────────────────────────────────────────────────────────
   # NORMAL MODE
   # Completion = <promise>COMPLETION_PROMISE</promise> in last message
+  # + optional .claude/autochecks.sh must pass (if present)
   # ────────────────────────────────────────────────────────────────
 
   PROMISE_TAG="<promise>${COMPLETION_PROMISE}</promise>"
 
   if echo "$LAST_MSG" | grep -qF "$PROMISE_TAG"; then
-    echo "[gulf-loop] Completion promise found. Loop complete after $ITERATION iteration(s)." >&2
-    rm -f "$STATE_FILE"
-    exit 0
+    # Promise found — run .claude/autochecks.sh if it exists
+    AUTOCHECK_SCRIPT=".claude/autochecks.sh"
+    if [[ -f "$AUTOCHECK_SCRIPT" && -x "$AUTOCHECK_SCRIPT" ]]; then
+      echo "[gulf-loop] Promise found. Running autochecks before accepting..." >&2
+      if AUTOCHECK_OUTPUT=$("$AUTOCHECK_SCRIPT" 2>&1); then
+        echo "[gulf-loop] Autochecks passed. Loop complete after $ITERATION iteration(s)." >&2
+        rm -f "$STATE_FILE"
+        exit 0
+      else
+        # Autochecks failed — reject the completion claim, re-inject with failure info
+        echo "[gulf-loop] Promise found but autochecks FAILED. Continuing loop." >&2
+        _update_field "iteration" "$NEXT"
+
+        FULL_REASON="$(printf '%s\n\n---\n## ⚠️ Completion Rejected — Autochecks Failed\n\nYou output the completion signal but the following checks failed:\n\n```\n%s\n```\n\nFix the failures above, then output the completion signal again.\n---\n\n%s' \
+          "$PROMPT" "$AUTOCHECK_OUTPUT" "$FRAMEWORK")"
+
+        _block "$FULL_REASON" \
+          "Gulf Loop | Iter $NEXT/$MAX_ITERATIONS | Promise REJECTED — autochecks failed"
+        exit 0
+      fi
+    else
+      # No autochecks script — trust the promise
+      echo "[gulf-loop] Completion promise found. Loop complete after $ITERATION iteration(s)." >&2
+      rm -f "$STATE_FILE"
+      exit 0
+    fi
   fi
 
   _update_field "iteration" "$NEXT"

@@ -84,16 +84,24 @@ Write to disk anything you need to remember.
 - **Premature completion signal**: outputting completion before all criteria pass. Only output when everything is verified.
 - **Convergence failure**: undoing what a previous iteration did. Check `progress.txt` before starting.
 - **Placeholders**: stub implementations that "look done" but aren't. Every function must be real.
+- **No-test vacuum**: treating "no tests exist" as "tests pass". If there are no tests, you must run the app instead and show it working. Silence is not success.
+- **Build ≠ Run**: a successful compile does not mean the app works. Always verify the runtime, not just the build.
 
 ---
 
 ### Completion
 
-Output the completion signal **only** when:
-- [ ] All tests pass (`exit 0`)
-- [ ] No type errors
-- [ ] No lint errors
-- [ ] No placeholder or stub code remains
-- [ ] `progress.txt` reflects all completed work
+Output the completion signal **only** when ALL of the following are machine-verified:
 
-When all of the above are true: output `<promise>{COMPLETION_PROMISE}</promise>`.
+- [ ] **Tests** — `npm test` / `pytest` / `cargo test` exits 0.
+  ⚠️ If no tests exist: explicitly state this AND perform an alternative runtime check (e.g. `npm run build`, start the server, hit an endpoint). Do NOT treat "no tests" as "tests pass".
+- [ ] **Type check** — `tsc --noEmit` / `mypy` / `cargo check` exits 0.
+- [ ] **Lint** — `npm run lint` / `ruff` / `clippy` exits 0.
+- [ ] **Runtime** — If the project produces a runnable artifact (server, desktop app, CLI), you MUST verify it actually starts without crashing. Show the command and its output.
+- [ ] **No placeholders** — No TODO, stub, or unimplemented functions remain.
+- [ ] **`progress.txt`** — Reflects all completed work and any known limitations.
+
+**Paste the actual terminal output** of each check inline before outputting the signal.
+Do NOT claim a check passed without showing its output.
+
+When all of the above are verified: output `<promise>{COMPLETION_PROMISE}</promise>`.
