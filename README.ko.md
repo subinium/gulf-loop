@@ -151,20 +151,22 @@ gulf-loop의 모든 메모리는 Token-level 텍스트 파일이다. 이유: 에
 
 | 파일 | 메모리 기능 | 역할 |
 |------|------------|------|
+| `gulf-align.md` | Alignment Memory (정렬 기억) | 루프 시작 전 합의된 명세·프로세스·평가 계약 |
 | `progress.txt` | Working Memory (작업 기억) | 현재 태스크의 상태, 다음 할 일, 의사결정 추론 |
 | `JUDGE_FEEDBACK.md` | Experiential Memory (경험 기억) | 어떤 접근이 왜 실패했는가의 누적 이력 |
 | `git history` | Factual Memory (사실 기억) | 무엇이 언제 왜 변경됐는가의 감사 추적 |
 
-세 파일의 역할이 다르다. 같은 "파일에 기록한다"는 행위가 목적에 따라 다른 메모리 기능을 수행한다.
+네 파일의 역할이 다르다. 같은 "파일에 기록한다"는 행위가 목적에 따라 다른 메모리 기능을 수행한다.
 
 **축 3: 동태(Dynamics)** — 어떻게 생성·갱신·검색되는가
 
 ```
-Formation  (생성):  Phase 1–4 실행 후 → progress.txt 기록
+Formation  (생성):  /gulf-loop:align 실행 후 → gulf-align.md 기록
+                    Phase 1–4 실행 후 → progress.txt 기록
                     Judge 거절 시 → JUDGE_FEEDBACK.md 기록
                     매 커밋 → git history 생성
 
-Retrieval  (검색):  Phase 0에서 세 파일 모두 읽기
+Retrieval  (검색):  Phase 0에서 네 파일 모두 읽기
                     다음 반복의 추론 컨텍스트로 직접 사용
 ```
 
@@ -433,11 +435,39 @@ flowchart TD
 
 **트레이드오프**: 평가자가 없다. 에이전트의 완료 선언을 신뢰한다. 코드 품질, 설계 결정 등 주관적 기준은 검증하지 않는다.
 
+#### Stop hook 흐름 — 기본 모드
+```
+Stop 이벤트
+  ├── 상태 파일 없음 → 종료 허용
+  ├── iteration >= max_iterations → 종료
+  ├── <promise>COMPLETE</promise> 감지
+  │     .claude/autochecks.sh 있고 실행 가능?
+  │       통과 → 종료 (자율 모드면 _try_merge)
+  │       실패 → 실패 출력과 함께 재주입
+  │     autochecks.sh 없음 → 종료 (자율 모드면 _try_merge)
+  └── 해당 없음 → iteration 증가, 프롬프트 + 프레임워크 재주입
+```
+
 ### Judge 모드
 
 **완료 조건**: Auto-checks 통과 **AND** Claude Opus judge APPROVED
 
 **트레이드오프**: 매 반복 Opus API 호출 비용이 든다. HITL 게이트가 있어 사람이 개입해야 하는 순간이 생긴다. 느리지만 정확도가 높다.
+
+#### Stop hook 흐름 — Judge 모드
+```
+Stop 이벤트
+  ├── [Gate 1] RUBRIC.md ## Auto-checks 실행
+  │     실패 → 실패 상세와 함께 재주입 (Opus 호출 없음)
+  │     통과 ↓
+  ├── [Gate 2] 행동적 Judge
+  │     ## Behavioral contracts 실행 → 종료 코드 + 출력 수집
+  │     변경된 소스 파일 읽기 (diff가 아닌 실제 내용)
+  │     Claude Opus 평가: 증거 + ## Judge criteria
+  │     APPROVED → 종료 (자율 모드면 _try_merge)
+  │     REJECTED → JUDGE_FEEDBACK.md에 기록, 이유와 함께 재주입
+  │     N번 연속 거절 → HITL 일시정지 (자율 모드면 전략 리셋)
+```
 
 ### 자율 모드 (Autonomous)
 
