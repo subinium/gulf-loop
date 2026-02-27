@@ -231,7 +231,7 @@ N번 연속 거절은 두 가지 중 하나를 의미한다:
 
 ### 원칙 3: "완료"를 사전에 정의한다
 
-암묵적인 완료 기준이 평가 차의 원인이다. RUBRIC.md는 이 정의를 세 층으로 나눈다:
+암묵적인 완료 기준이 평가 차의 원인이다. RUBRIC.md는 이 정의를 두 층으로 나눈다:
 
 - **Checks**: 이중 역할을 하는 쉘 명령어 — 빠른 게이트 (실패 시 Opus 호출 없이 즉시 재주입) + LLM 행동적 증거 (모두 통과 시 출력을 judge에 전달)
 - **Judge criteria**: checks 출력 + 소스 파일을 바탕으로 LLM이 평가하는 자연어 요건
@@ -533,45 +533,7 @@ Sycophancy Loop를 끊는 메커니즘이다. 같은 방향의 변형을 반복�
 
 ---
 
-## 9. 아직 없는 것 (실행 차 간극)
-
-### `/gulf-loop:align` — 구현됨
-
-루프 시작 전 정렬 단계. 에이전트가 `RUBRIC.md`와 기존 코드를 읽고, 4개 섹션으로 구성된 정렬 문서를 `.claude/gulf-align.md`에 저장한다.
-
-```bash
-/gulf-loop:align
-# 에이전트가 분석하고 저장:
-#
-# ## Specification Alignment
-# Goal: [한 문장으로 핵심 deliverable]
-# Deliverables: [완료 시 존재해야 할 구체적 결과물]
-# Out of scope: [하지 않을 것]
-#
-# ## Process Alignment
-# Approach: [기술 전략 한 문장]
-# Sequence: [순서가 있는 단계별 작업]
-#
-# ## Evaluation Alignment
-# Machine checks: [정확한 검증 명령어]
-# Edge cases: [다뤄야 할 경계 조건]
-#
-# ## Gulf of Envisioning — Gap Check
-# Capability gaps: [불확실한 능력 범위]
-# Instruction gaps: [명세의 모호한 부분]
-# Intentionality gaps: [예측하기 어려운 설계 선택]
-# Blocking questions: [사람의 확인이 필요한 것]
-```
-
-이후 모든 루프 반복은 Phase 0에서 `gulf-align.md`를 읽는다. 이 문서는 합의된 실행-평가 계약이다. 업데이트 없이 이 계약을 벗어나는 것은 수렴 실패다.
-
-권장 워크플로우:
-```bash
-/gulf-loop:align                                  # 갭 먼저 표면화
-/gulf-loop:start-with-judge "$(cat PROMPT.md)"    # 평가 포함 루프
-```
-
-20번 반복 후 방향 수정보다, 0번째에서 방향을 확인하는 게 훨씬 싸다.
+## 9. 아직 없는 것
 
 ### 예정: `milestone_every` — 선제적 체크포인트
 
@@ -627,6 +589,13 @@ cd gulf-loop
 ---
 
 ## 11. 사용법
+
+### 권장 워크플로우 (모든 모드)
+
+```bash
+/gulf-loop:align                                  # 갭 먼저 표면화
+/gulf-loop:start-with-judge "$(cat PROMPT.md)"    # 평가 포함 루프
+```
 
 ### 기본 모드
 
@@ -698,7 +667,7 @@ cd gulf-loop
 | 루프 패턴 | ReAct | ReAct + Reflexion |
 | 실행 차 대응 | 없음 | Phase 프레임워크 + 언어 트리거 매 반복 주입 |
 | 평가 차 대응 | 완료 약속만 | RUBRIC.md + checks (이중 역할 게이트+증거) + judge + JUDGE_FEEDBACK.md |
-| 메모리 구조 | 없음 | 3축 메모리 (Working/Experiential/Factual) |
+| 메모리 구조 | 없음 | 4계층 (Alignment/Working/Experiential/Factual) |
 | HITL | 없음 | 핵심 설계 — 평가 수렴 실패 시 인간에게 제어권 |
 | 자율 모드 | 없음 | 브랜치 기반, 자동 merge, 전략 리셋 |
 | 완료 감지 | JSONL 트랜스크립트 파싱 | `last_assistant_message` 필드 직접 사용 |

@@ -2,11 +2,11 @@
 # run-judge.sh — Execution-first judge for Gulf Loop
 #
 # Architecture:
-#   1. Run RUBRIC.md ## Behavioral contracts (shell commands → exit 0/1 + output)
+#   1. Run RUBRIC.md ## Checks (shell commands → exit 0/1 + output)
 #   2. Read changed source files (not diff — actual current content)
 #   3. LLM judge evaluates behavioral evidence + criteria → APPROVED/REJECTED
 #
-# Reads:   RUBRIC.md (## Behavioral contracts, ## Judge criteria)
+# Reads:   RUBRIC.md (## Checks, ## Judge criteria)
 # Env:     GULF_BASE_BRANCH — if set, evaluates all changes since diverging from this branch
 # Output:  "APPROVED" or "REJECTED: [reason]" to stdout
 # Exit:    always 0 (caller handles logic)
