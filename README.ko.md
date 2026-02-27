@@ -204,15 +204,57 @@ npm run lint
   --hitl-threshold 5
 ```
 
+### 자율 모드 (인간 개입 없음)
+
+완료 조건은 위와 동일하지만, 루프가 **사람을 기다리며 멈추지 않는다**.
+
+- 전용 feature 브랜치(`gulf/auto-{timestamp}`)에서 작업
+- 완료 시: base 브랜치로 rebase 후 자동 merge
+- merge conflict 시: 자율 해소 — 에이전트가 양쪽 의도 파악 후 테스트 작성 후 재커밋
+- Judge 연속 거절 시: HITL 일시정지 대신 **전략 리셋**
+
+```bash
+# 기본 자율 모드
+/gulf-loop:start-autonomous "$(cat PROMPT.md)" \
+  --max-iterations 200 \
+  --base-branch main
+
+# 자율 + judge 모드
+/gulf-loop:start-autonomous "$(cat PROMPT.md)" \
+  --max-iterations 200 \
+  --with-judge \
+  --hitl-threshold 10
+```
+
+### 병렬 모드 (여러 worktree)
+
+N개의 git worktree를 만들고 각각 독립적인 자율 루프를 실행한다. merge는 flock으로 자동 직렬화되어 수동 조율이 필요 없다.
+
+```bash
+/gulf-loop:start-parallel "$(cat PROMPT.md)" \
+  --workers 3 \
+  --max-iterations 200 \
+  --base-branch main
+```
+
+출력된 각 worktree 경로를 별도 Claude Code 세션에서 열고 `/gulf-loop:resume`을 실행한다.
+
+**merge 흐름:**
+- 먼저 완료된 worker가 lock 획득 → rebase → merge
+- 이후 worker들은 업데이트된 base 브랜치로 rebase 후 순서대로 merge
+- merge conflict는 해당 worker가 자율적으로 해소
+
 ### 명령어
 
 | 명령어 | 설명 |
 |--------|------|
 | `/gulf-loop:start PROMPT [--max-iterations N] [--completion-promise TEXT]` | 기본 루프 |
 | `/gulf-loop:start-with-judge PROMPT [--max-iterations N] [--hitl-threshold N]` | Judge 포함 루프 |
+| `/gulf-loop:start-autonomous PROMPT [--max-iterations N] [--base-branch BRANCH] [--with-judge]` | 자율 루프 (HITL 없음) |
+| `/gulf-loop:start-parallel PROMPT --workers N [--max-iterations N] [--base-branch BRANCH]` | 병렬 worktree 루프 |
 | `/gulf-loop:status` | 현재 반복 횟수 확인 |
 | `/gulf-loop:cancel` | 루프 중단 |
-| `/gulf-loop:resume` | HITL 일시정지 후 재개 |
+| `/gulf-loop:resume` | HITL 일시정지 후 재개 (또는 사전 초기화된 worktree 시작) |
 
 ---
 
@@ -225,9 +267,9 @@ Stop 이벤트
   ├── iteration >= max_iterations → 종료
   ├── 마지막 메시지에 <promise>COMPLETE</promise>
   │     .claude/autochecks.sh 존재? → 실행
-  │       통과 → 종료
+  │       통과 → 종료 (자율 모드면 _try_merge)
   │       실패 → 실패 출력과 함께 재주입
-  │     autochecks.sh 없음 → 종료
+  │     autochecks.sh 없음 → 종료 (자율 모드면 _try_merge)
   └── 그 외 → 반복 증가, 프롬프트 + 프레임워크 재주입
 ```
 
@@ -238,9 +280,22 @@ Stop 이벤트
   │     실패 → 실패 내용과 함께 재주입
   │     모두 통과 ↓
   ├── [게이트 2] Claude Opus가 RUBRIC.md ## Judge criteria 평가
-  │     APPROVED → 종료
+  │     APPROVED → 종료 (자율 모드면 _try_merge)
   │     REJECTED → JUDGE_FEEDBACK.md 기록, 이유와 함께 재주입
-  │     N번 연속 거절 → HITL 일시정지 (active: false)
+  │     N번 연속 거절 → HITL 일시정지 (자율 모드면 전략 리셋)
+```
+
+### 자율 merge (_try_merge)
+```
+_try_merge
+  ├── flock 획득 (~/.claude/gulf-merge.lock)
+  │     잠김 → "merge 대기 중, 다음 반복에 재시도" 재주입
+  ├── git fetch + git rebase base_branch
+  │     conflict → conflict 해소 태스크 재주입
+  │                 에이전트가 해소 후 테스트 작성 후 재커밋 후 재신호
+  ├── .claude/autochecks.sh 실행 (있는 경우)
+  │     실패 → 테스트 실패 상세와 함께 재주입
+  └── git merge --no-ff branch → cleanup → lock 해제 → 종료
 ```
 
 ---

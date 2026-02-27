@@ -204,15 +204,57 @@ Create `RUBRIC.md` first (see `RUBRIC.example.md`), then:
   --hitl-threshold 5
 ```
 
+### Autonomous mode (no human intervention)
+
+Completion = same as above, but the loop **never pauses for human input**.
+
+- Works on a dedicated feature branch (`gulf/auto-{timestamp}`)
+- On completion: rebases on base branch and auto-merges
+- On merge conflict: resolves autonomously — agent studies both sides, writes tests, recommits
+- On consecutive judge rejections: **strategy reset** instead of HITL pause
+
+```bash
+# Basic autonomous
+/gulf-loop:start-autonomous "$(cat PROMPT.md)" \
+  --max-iterations 200 \
+  --base-branch main
+
+# Autonomous + judge
+/gulf-loop:start-autonomous "$(cat PROMPT.md)" \
+  --max-iterations 200 \
+  --with-judge \
+  --hitl-threshold 10
+```
+
+### Parallel mode (multiple worktrees)
+
+Creates N git worktrees, each running an independent autonomous loop on its own branch. Merges are serialized automatically via flock — no manual coordination needed.
+
+```bash
+/gulf-loop:start-parallel "$(cat PROMPT.md)" \
+  --workers 3 \
+  --max-iterations 200 \
+  --base-branch main
+```
+
+Then open each printed worktree path in a separate Claude Code session and run `/gulf-loop:resume`.
+
+**Merge flow:**
+- First worker to complete acquires lock → rebases → merges
+- Subsequent workers rebase on the updated base branch → merge in turn
+- Any merge conflict is resolved autonomously by the worker that encounters it
+
 ### Commands
 
 | Command | Description |
 |---------|-------------|
 | `/gulf-loop:start PROMPT [--max-iterations N] [--completion-promise TEXT]` | Basic loop |
 | `/gulf-loop:start-with-judge PROMPT [--max-iterations N] [--hitl-threshold N]` | Loop with judge |
+| `/gulf-loop:start-autonomous PROMPT [--max-iterations N] [--base-branch BRANCH] [--with-judge]` | Autonomous loop (no HITL) |
+| `/gulf-loop:start-parallel PROMPT --workers N [--max-iterations N] [--base-branch BRANCH]` | Parallel worktree loops |
 | `/gulf-loop:status` | Current iteration count |
 | `/gulf-loop:cancel` | Stop the loop |
-| `/gulf-loop:resume` | Resume after HITL pause |
+| `/gulf-loop:resume` | Resume after HITL pause (or start pre-initialized worktree) |
 
 ---
 
@@ -225,9 +267,9 @@ Stop event
   ├── iteration >= max_iterations → stop
   ├── <promise>COMPLETE</promise> in last message
   │     .claude/autochecks.sh exists? → run it
-  │       Pass → stop
+  │       Pass → stop (or _try_merge if autonomous)
   │       Fail → re-inject with failure output
-  │     No autochecks.sh → stop
+  │     No autochecks.sh → stop (or _try_merge if autonomous)
   └── Otherwise → increment iteration, re-inject prompt + framework
 ```
 
@@ -238,9 +280,22 @@ Stop event
   │     Any fail → re-inject with failure details
   │     All pass ↓
   ├── [Gate 2] Claude Opus evaluates RUBRIC.md ## Judge criteria
-  │     APPROVED → stop
+  │     APPROVED → stop (or _try_merge if autonomous)
   │     REJECTED → write JUDGE_FEEDBACK.md, re-inject with reason
-  │     N consecutive rejections → HITL pause (active: false)
+  │     N consecutive rejections → HITL pause  (or strategy reset if autonomous)
+```
+
+### Autonomous merge (_try_merge)
+```
+_try_merge
+  ├── Acquire flock (~/.claude/gulf-merge.lock)
+  │     Locked → re-inject "merge queued, retry next iteration"
+  ├── git fetch + git rebase base_branch
+  │     Conflict → re-inject conflict resolution task
+  │                 agent resolves, writes tests, recommits, re-signals
+  ├── Run .claude/autochecks.sh (if present)
+  │     Fail → re-inject with test failure details
+  └── git merge --no-ff branch → cleanup → release lock → stop
 ```
 
 ---
