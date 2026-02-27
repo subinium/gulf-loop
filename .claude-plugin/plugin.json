@@ -1,0 +1,8 @@
+{
+  "name": "gulf-loop",
+  "version": "1.0.0",
+  "description": "Ralph Loop (Ralph Wiggum technique) — autonomous iterative development via Stop hook. Each iteration: fresh context, disk-persisted state, machine-verified completion.",
+  "author": {
+    "name": "subinium"
+  }
+}

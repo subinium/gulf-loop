@@ -1,0 +1,15 @@
+{
+  "description": "Gulf Loop (Ralph Loop) — Stop hook that intercepts Claude's exit and re-injects the original prompt until the completion promise is found or max iterations is reached.",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop-hook.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
