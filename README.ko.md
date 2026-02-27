@@ -182,6 +182,16 @@ cd gulf-loop
 /gulf-loop:start "$(cat PROMPT.md)" --max-iterations 30
 ```
 
+프로젝트에 `.claude/autochecks.sh`를 추가할 수 있다. 파일이 존재하고 실행 권한이 있으면, 완료 신호 감지 후 이 스크립트를 실행한다. 실패 시 완료를 거절하고 실패 출력과 함께 에이전트를 재주입한다.
+
+```bash
+# .claude/autochecks.sh
+#!/usr/bin/env bash
+npm test
+npx tsc --noEmit
+npm run lint
+```
+
 ### Judge 모드 (평가 차 완전 활성화)
 
 완료 조건 = auto-checks 통과 **AND** Opus judge 승인.
@@ -213,7 +223,11 @@ cd gulf-loop
 Stop 이벤트
   ├── 상태 파일 없음 → 종료 허용
   ├── iteration >= max_iterations → 종료
-  ├── 마지막 메시지에 <promise>COMPLETE</promise> → 종료
+  ├── 마지막 메시지에 <promise>COMPLETE</promise>
+  │     .claude/autochecks.sh 존재? → 실행
+  │       통과 → 종료
+  │       실패 → 실패 출력과 함께 재주입
+  │     autochecks.sh 없음 → 종료
   └── 그 외 → 반복 증가, 프롬프트 + 프레임워크 재주입
 ```
 

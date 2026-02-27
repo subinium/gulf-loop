@@ -182,6 +182,16 @@ Completion = agent outputs `<promise>COMPLETE</promise>`.
 /gulf-loop:start "$(cat PROMPT.md)" --max-iterations 30
 ```
 
+Optionally, add `.claude/autochecks.sh` to your project. If present and executable, it runs after the completion promise is detected — if it fails, completion is rejected and the agent is re-injected with the failure output.
+
+```bash
+# .claude/autochecks.sh
+#!/usr/bin/env bash
+npm test
+npx tsc --noEmit
+npm run lint
+```
+
 ### Judge mode (Gulf of Evaluation fully activated)
 
 Completion = auto-checks pass **AND** Opus judge approves.
@@ -213,7 +223,11 @@ Create `RUBRIC.md` first (see `RUBRIC.example.md`), then:
 Stop event
   ├── No state file → allow stop
   ├── iteration >= max_iterations → stop
-  ├── <promise>COMPLETE</promise> in last message → stop
+  ├── <promise>COMPLETE</promise> in last message
+  │     .claude/autochecks.sh exists? → run it
+  │       Pass → stop
+  │       Fail → re-inject with failure output
+  │     No autochecks.sh → stop
   └── Otherwise → increment iteration, re-inject prompt + framework
 ```
 
