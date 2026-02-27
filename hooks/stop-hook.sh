@@ -149,7 +149,7 @@ _try_merge() {
     echo "[gulf-loop] Merge lock held by another worker. Will retry next iteration." >&2
     _update_field "iteration" "$NEXT"
     _block \
-      "$(printf '%s\n\n---\n## Merge Queued\n\nAnother worker is currently merging into `%s`.\nThe loop will continue and retry the merge after the next iteration.\nYou may do further polishing work, or simply output the completion signal again.\n---\n\n%s' \
+      "$(printf '%s\n\n---\n## Merge Queued\n\nAnother worker is currently merging into %s.\nThe loop will continue and retry the merge after the next iteration.\nYou may do further polishing work, or simply output the completion signal again.\n---\n\n%s' \
         "$PROMPT" "$BASE_BRANCH" "$FRAMEWORK")" \
       "Gulf Loop | Iter $NEXT/$MAX_ITERATIONS | Merge queued — waiting for lock"
     return
@@ -173,7 +173,7 @@ _try_merge() {
     flock -u 9
     _update_field "iteration" "$NEXT"
     _block \
-      "$(printf '%s\n\n---\n## ⚠️ Merge Conflict — Autonomous Resolution Required\n\nYour branch (`%s`) conflicts with `%s` on:\n\n```\n%s\n```\n\n### Resolution instructions\n\n1. Study both sides: `git log %s..HEAD` and `git log HEAD..origin/%s`\n2. Implement merged logic that preserves the intent of BOTH sides.\n3. Write or update tests covering the merged behavior.\n4. Verify all existing tests pass.\n5. Commit: `git add -A && git commit -m \"fix: resolve merge conflict with %s\"`\n6. Output the completion signal — merge is retried automatically.\n\n**Priority: logic correctness > test coverage > style.**\nNever discard one side's changes without understanding them.\n---\n\n%s' \
+      "$(printf '%s\n\n---\n## Merge Conflict -- Autonomous Resolution Required\n\nYour branch (%s) conflicts with %s on:\n\n%s\n\n### Resolution instructions\n\n1. Study both sides: git log %s..HEAD and git log HEAD..origin/%s\n2. Implement merged logic that preserves the intent of BOTH sides.\n3. Write or update tests covering the merged behavior.\n4. Verify all existing tests pass.\n5. Commit: git add -A and commit with message fix: resolve merge conflict with %s\n6. Output the completion signal -- merge is retried automatically.\n\n**Priority: logic correctness > test coverage > style.**\nNever discard one side'\''s changes without understanding them.\n---\n\n%s' \
         "$PROMPT" \
         "$BRANCH" "$BASE_BRANCH" "$CONFLICT_FILES" \
         "$BASE_BRANCH" "$BASE_BRANCH" "$BASE_BRANCH" \
@@ -196,7 +196,7 @@ _try_merge() {
       flock -u 9
       _update_field "iteration" "$NEXT"
       _block \
-        "$(printf '%s\n\n---\n## ⚠️ Post-Rebase Tests Failed\n\nSuccessfully rebased on `%s` but autochecks failed:\n\n```\n%s\n```\n\nFix the failures, then output the completion signal again.\n---\n\n%s' \
+        "$(printf '%s\n\n---\n## Post-Rebase Tests Failed\n\nSuccessfully rebased on %s but autochecks failed:\n\n%s\n\nFix the failures, then output the completion signal again.\n---\n\n%s' \
           "$PROMPT" "$BASE_BRANCH" "$AUTOCHECK_OUTPUT" "$FRAMEWORK")" \
         "Gulf Loop | Iter $NEXT/$MAX_ITERATIONS | Rebase OK — tests FAILED"
       return
@@ -230,26 +230,20 @@ if [[ "$JUDGE_ENABLED" == "true" ]]; then
   # Completion = auto-checks pass AND Opus judge APPROVED
   # ────────────────────────────────────────────────────────────────
 
-  # 8a. Run auto-checks
-  if AUTOCHECK_OUTPUT=$("${PLUGIN_ROOT}/scripts/run-autochecks.sh" 2>&1); then
-    AUTOCHECK_EXIT=0
-  else
-    AUTOCHECK_EXIT=$?
-  fi
+  # 8a. Run judge (handles checks + LLM evaluation in one call)
+  # Returns: APPROVED | CHECKS_FAILED: ... | REJECTED: ...
+  JUDGE_OUTPUT=$(GULF_BASE_BRANCH="$BASE_BRANCH" "${PLUGIN_ROOT}/scripts/run-judge.sh" 2>/dev/null) || JUDGE_OUTPUT="APPROVED"
 
-  if [[ $AUTOCHECK_EXIT -ne 0 ]]; then
+  # Check failures — transient, do not count toward consecutive_rejections
+  if echo "$JUDGE_OUTPUT" | grep -q "^CHECKS_FAILED"; then
     _update_field "iteration" "$NEXT"
-
-    FULL_REASON="$(printf '%s\n\n---\n## Auto-check Failures (fix before continuing)\n%s\n---\n\n%s' \
-      "$PROMPT" "$AUTOCHECK_OUTPUT" "$FRAMEWORK")"
-
+    CHECK_REASON=$(echo "$JUDGE_OUTPUT" | sed 's/^CHECKS_FAILED:[[:space:]]*//')
+    FULL_REASON="$(printf '%s\n\n---\n## Checks Failed (fix before continuing)\n%s\n---\n\n%s' \
+      "$PROMPT" "$CHECK_REASON" "$FRAMEWORK")"
     _block "$FULL_REASON" \
-      "Gulf Loop | Iter $NEXT/$MAX_ITERATIONS | Auto-checks FAILED — fix required"
+      "Gulf Loop | Iter $NEXT/$MAX_ITERATIONS | Checks FAILED — fix required"
     exit 0
   fi
-
-  # 8b. Auto-checks passed → call Judge
-  JUDGE_OUTPUT=$(GULF_BASE_BRANCH="$BASE_BRANCH" "${PLUGIN_ROOT}/scripts/run-judge.sh" 2>/dev/null) || JUDGE_OUTPUT="APPROVED"
 
   if echo "$JUDGE_OUTPUT" | grep -q "^APPROVED"; then
     if [[ "$AUTONOMOUS" == "true" && -n "$BRANCH" ]]; then
@@ -331,7 +325,7 @@ else
         fi
       else
         _update_field "iteration" "$NEXT"
-        FULL_REASON="$(printf '%s\n\n---\n## ⚠️ Completion Rejected — Autochecks Failed\n\nYou output the completion signal but the following checks failed:\n\n```\n%s\n```\n\nFix the failures above, then output the completion signal again.\n---\n\n%s' \
+        FULL_REASON="$(printf '%s\n\n---\n## Completion Rejected -- Autochecks Failed\n\nYou output the completion signal but the following checks failed:\n\n%s\n\nFix the failures above, then output the completion signal again.\n---\n\n%s' \
           "$PROMPT" "$AUTOCHECK_OUTPUT" "$FRAMEWORK")"
         _block "$FULL_REASON" \
           "Gulf Loop | Iter $NEXT/$MAX_ITERATIONS | Promise REJECTED — autochecks failed"

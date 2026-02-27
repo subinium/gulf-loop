@@ -44,7 +44,7 @@ _section() {
   ' "$RUBRIC_FILE" | sed '/^[[:space:]]*$/d'
 }
 
-CONTRACTS=$(_section "Behavioral contracts")
+CONTRACTS=$(_section "Checks")
 CRITERIA=$(_section "Judge criteria")
 
 # Need at least one of them to do anything
@@ -154,15 +154,18 @@ if [[ -n "$CHANGED_FILES" ]]; then
   done <<< "$CHANGED_FILES"
 fi
 
-# ── 7. Short-circuit: if no LLM criteria, contracts alone decide ──
+# ── 7. If any checks failed, return CHECKS_FAILED (not REJECTED) ──
+# CHECKS_FAILED does not increment consecutive_rejections in stop-hook.sh.
+# It is treated as a transient failure (fix the code), not a strategy failure.
+if [[ "$ALL_CONTRACTS_PASSED" == "false" ]]; then
+  echo "CHECKS_FAILED: ${FAIL_COUNT} of ${CONTRACT_COUNT} check(s) failed."
+  exit 0
+fi
+
+# All checks passed — if no LLM criteria, approve immediately (no Opus call)
 if [[ -z "$CRITERIA" ]]; then
-  if [[ "$ALL_CONTRACTS_PASSED" == "true" ]]; then
-    echo "APPROVED"
-    exit 0
-  else
-    echo "REJECTED: ${FAIL_COUNT} of ${CONTRACT_COUNT} behavioral contract(s) failed. Fix all failing contracts before requesting judge approval."
-    exit 0
-  fi
+  echo "APPROVED"
+  exit 0
 fi
 
 # ── 8. Build judge prompt ─────────────────────────────────────────

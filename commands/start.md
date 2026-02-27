@@ -1,7 +1,7 @@
 ---
 description: "Start a Gulf Loop — autonomous iterative development until the completion promise is output"
 argument-hint: "PROMPT [--max-iterations N] [--completion-promise TEXT]"
-allowed-tools: ["Bash(${CLAUDE_PLUGIN_ROOT}/scripts/setup-loop.sh:*)"]
+allowed-tools: ["Bash(${CLAUDE_PLUGIN_ROOT}/scripts/setup.sh:*)"]
 hide-from-slash-command-tool: "true"
 ---
 
@@ -10,7 +10,7 @@ hide-from-slash-command-tool: "true"
 Initialize the loop and begin working on the task.
 
 ```!
-"${CLAUDE_PLUGIN_ROOT}/scripts/setup-loop.sh" $ARGUMENTS
+"${CLAUDE_PLUGIN_ROOT}/scripts/setup.sh" --mode basic $ARGUMENTS
 ```
 
 ---

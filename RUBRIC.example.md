@@ -22,32 +22,24 @@ Design choices with multiple valid answers that the agent must decide.
 
 ---
 
-## Behavioral contracts
+## Checks
 
-Shell commands executed **inside** the judge evaluation as behavioral evidence.
-Each line starting with `- ` is run; exit code + stdout/stderr are fed to the LLM judge.
-All must exit 0 for the judge to APPROVE.
+Shell commands that must all exit 0. Each line starting with `- ` is executed.
 
-Unlike Auto-checks (which are a fast gate), behavioral contracts give the LLM judge
-interpretable evidence: *why* a test failed, what a function actually returned, whether
-an endpoint responded as specified. Use commands that produce meaningful output on failure.
+**Two roles, one section:**
+- If any check fails → loop re-injects immediately, no Opus API call (fast gate).
+- If all pass → exit code + output are fed to the LLM judge as behavioral evidence.
 
-<!-- Examples:
-- npm test
-- node -e "const {validate} = require('./src/validate'); process.exit(validate(null) === false ? 0 : 1)"
-- curl -sf http://localhost:3000/health | grep -q '"status":"ok"'
-- node -e "const {fn} = require('./src'); const r = fn([]); console.log(r); process.exit(Array.isArray(r) ? 0 : 1)"
--->
-
-## Auto-checks
-
-Commands that must all exit 0 **before** the Judge is invoked (fast structural gate).
-Each line starting with `- ` is executed as a shell command.
-If any fail, the loop re-injects immediately without spending API credits on the judge.
+Use commands that produce meaningful output on failure so the judge can explain
+*why* it failed, not just *that* it failed.
 
 - npm test
 - npx tsc --noEmit
 - npm run lint
+<!-- Add specific behavioral checks for targeted verification:
+- node -e "const {fn} = require('./src'); process.exit(fn(null) === false ? 0 : 1)"
+- curl -sf http://localhost:3000/health | grep -q '"status":"ok"'
+-->
 
 ## Judge criteria
 

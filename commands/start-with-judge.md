@@ -1,7 +1,7 @@
 ---
-description: "Start a Gulf Loop with LLM Judge — completes only when auto-checks pass AND Claude Opus approves"
+description: "Start a Gulf Loop with LLM Judge — completes only when checks pass AND Claude Opus approves"
 argument-hint: "PROMPT [--max-iterations N] [--hitl-threshold N]"
-allowed-tools: ["Bash(${CLAUDE_PLUGIN_ROOT}/scripts/setup-judge.sh:*)"]
+allowed-tools: ["Bash(${CLAUDE_PLUGIN_ROOT}/scripts/setup.sh:*)"]
 hide-from-slash-command-tool: "true"
 ---
 
@@ -10,35 +10,33 @@ hide-from-slash-command-tool: "true"
 Initialize judge-enabled loop. Requires `RUBRIC.md` in the project root.
 
 ```!
-"${CLAUDE_PLUGIN_ROOT}/scripts/setup-judge.sh" $ARGUMENTS
+"${CLAUDE_PLUGIN_ROOT}/scripts/setup.sh" --mode judge $ARGUMENTS
 ```
 
 ---
 
 ## How judge mode works
 
-Completion in this mode requires **two stages** in sequence:
+Completion requires all `## Checks` to pass **and** Claude Opus to approve:
 
 ```
 Every iteration
       │
       ▼
-[Gate 1] Auto-checks (RUBRIC.md ## Auto-checks)
-      │  All exit 0? Fast structural gate — lint, types, tests.
-      ├── No  → re-inject with failure details (no Opus API call)
-      └── Yes ▼
-[Gate 2] Behavioral Judge
-      │  1. Execute ## Behavioral contracts → collect exit codes + output
-      │  2. Read changed source files (actual content, not diff)
-      │  3. Claude Opus evaluates with behavioral evidence + ## Judge criteria
+[Checks Gate] RUBRIC.md ## Checks — all commands must exit 0
+      ├── Any fail → re-inject with failure details (no Opus API call)
+      └── All pass → output becomes LLM behavioral evidence ▼
+[Judge] Claude Opus evaluates:
+      │  1. ## Checks output (behavioral evidence — what the code does)
+      │  2. Changed source files (actual content, not diff)
+      │  3. ## Judge criteria (natural-language requirements)
       │  APPROVED?
       ├── No  → append to JUDGE_FEEDBACK.md, re-inject with reason
       └── Yes → loop ends
 ```
 
-**Key difference from diff-based evaluation**: the judge sees what the code *actually does*
-(contract execution results) and what it *currently is* (source files), not just what changed.
-This catches behavioral regressions, silent failures, and interface violations that diffs miss.
+**`## Checks` dual role**: fast gate (structural breakage caught without Opus cost) *and*
+behavioral evidence (execution output fed to the judge). One section, two functions.
 
 **HITL gate**: after N consecutive Judge rejections, the loop pauses.
 Review `JUDGE_FEEDBACK.md`, update `RUBRIC.md` if needed, then run `/gulf-loop:resume`.
@@ -88,16 +86,13 @@ model: claude-opus-4-6    # judge model (haiku / sonnet / opus)
 hitl_threshold: 5         # consecutive rejections before HITL pause
 ---
 
-## Behavioral contracts
-# Executed by the judge — exit code + output becomes LLM evidence.
+## Checks
+# Dual role: fast gate (any fail → re-inject, no Opus call) + LLM behavioral evidence.
 # Use commands that produce meaningful output on failure.
 - npm test
-- node -e "const {fn} = require('./src'); process.exit(fn(null) === false ? 0 : 1)"
-
-## Auto-checks
-# Fast gate before judge call — if any fail, judge is not invoked.
 - npx tsc --noEmit
 - npm run lint
+- node -e "const {fn} = require('./src'); process.exit(fn(null) === false ? 0 : 1)"
 
 ## Judge criteria
 - Every function has a single, clear responsibility.

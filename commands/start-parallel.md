@@ -1,7 +1,7 @@
 ---
 description: "Set up N parallel autonomous Gulf Loops in separate git worktrees — each merges independently"
 argument-hint: "PROMPT --workers N [--max-iterations N] [--base-branch BRANCH] [--with-judge]"
-allowed-tools: ["Bash(${CLAUDE_PLUGIN_ROOT}/scripts/setup-parallel.sh:*)"]
+allowed-tools: ["Bash(${CLAUDE_PLUGIN_ROOT}/scripts/setup.sh:*)"]
 hide-from-slash-command-tool: "true"
 ---
 
@@ -10,7 +10,7 @@ hide-from-slash-command-tool: "true"
 Create N git worktrees for parallel autonomous loops.
 
 ```!
-"${CLAUDE_PLUGIN_ROOT}/scripts/setup-parallel.sh" $ARGUMENTS
+"${CLAUDE_PLUGIN_ROOT}/scripts/setup.sh" --mode parallel $ARGUMENTS
 ```
 
 ---

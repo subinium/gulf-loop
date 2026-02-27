@@ -1,7 +1,7 @@
 ---
 description: "Start a fully autonomous Gulf Loop — no HITL, branch-based, auto-merges on completion"
 argument-hint: "PROMPT [--max-iterations N] [--base-branch BRANCH] [--with-judge] [--hitl-threshold N]"
-allowed-tools: ["Bash(${CLAUDE_PLUGIN_ROOT}/scripts/setup-autonomous.sh:*)"]
+allowed-tools: ["Bash(${CLAUDE_PLUGIN_ROOT}/scripts/setup.sh:*)"]
 hide-from-slash-command-tool: "true"
 ---
 
@@ -10,7 +10,7 @@ hide-from-slash-command-tool: "true"
 Initialize the autonomous loop. No human intervention required.
 
 ```!
-"${CLAUDE_PLUGIN_ROOT}/scripts/setup-autonomous.sh" $ARGUMENTS
+"${CLAUDE_PLUGIN_ROOT}/scripts/setup.sh" --mode autonomous $ARGUMENTS
 ```
 
 ---

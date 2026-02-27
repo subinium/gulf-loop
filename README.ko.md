@@ -199,7 +199,7 @@ Retrieval  (검색):  Phase 0에서 네 파일 모두 읽기
 | **Context Pressure Collapse** | 75% 컴팩션 후 추론 맥락 소실 | 이전에 거절된 접근을 재시도 | max_iterations 제한, 간결한 progress.txt |
 | **Convergence Failure** | 이전 반복 작업을 되돌림 | "2 steps forward, 1 step back" | Phase 0 필수화, progress.txt 체크 |
 | **Metric Gaming** | 완료 신호를 위한 지름길 | 테스트 삭제, 하드코딩, 스텁 | Phase 999 불변 규칙 |
-| **Premature Completion** | 검증 없이 완료 선언 | 기준 미충족 상태에서 신호 출력 | autochecks.sh, judge 게이트 |
+| **Premature Completion** | 검증 없이 완료 선언 | 기준 미충족 상태에서 신호 출력 | autochecks.sh (기본), checks 게이트 (judge) |
 | **Cold-start Bloat** | Phase 0에서 과도한 읽기 | Orient에 컨텍스트 20%+ 소비 | Phase 0 예산 ≤20% 제한 |
 
 ---
@@ -233,13 +233,10 @@ N번 연속 거절은 두 가지 중 하나를 의미한다:
 
 암묵적인 완료 기준이 평가 차의 원인이다. RUBRIC.md는 이 정의를 세 층으로 나눈다:
 
-- **Auto-checks**: judge 호출 전 빠른 구조적 게이트 (테스트, 타입 체크, 린트) — 종료 코드만 확인
-- **Behavioral contracts**: judge *내부*에서 실행되는 쉘 명령어 — LLM이 출력을 해석하는 행동적 증거. "코드가 무엇을 *하는가*"를 확인
-- **Judge criteria**: 행동적 증거 + 소스 파일을 바탕으로 LLM이 평가하는 자연어 요건
+- **Checks**: 이중 역할을 하는 쉘 명령어 — 빠른 게이트 (실패 시 Opus 호출 없이 즉시 재주입) + LLM 행동적 증거 (모두 통과 시 출력을 judge에 전달)
+- **Judge criteria**: checks 출력 + 소스 파일을 바탕으로 LLM이 평가하는 자연어 요건
 
-각 층은 서로 다른 실패 모드를 잡아낸다. Auto-checks는 구조적 파손을 저렴하게 잡는다. Behavioral contracts는 테스트가 놓치는 인터페이스 위반과 조용한 실패를 잡는다. Judge criteria는 어느 기계도 직접 관찰할 수 없는 설계 수준의 문제를 잡는다.
-
-순서가 있다. 구조적 검사는 기계에게, 행동적 증거는 두 번째로, 해석적 판단은 마지막에.
+두 층, 명확한 분리: 행동적 증거를 먼저 기계에게, 해석적 판단을 마지막에.
 
 ### 원칙 4: 평가 이력은 영속적이어야 한다
 
@@ -296,13 +293,10 @@ model: claude-opus-4-6
 hitl_threshold: 5
 ---
 
-## Behavioral contracts
-# judge 내부에서 실행 — 출력이 LLM 증거가 됨.
+## Checks
+# 이중 역할: 빠른 게이트 (실패 → Opus 호출 없이 재주입) + LLM 행동적 증거.
+# 실패 시 의미 있는 출력을 생성하는 명령어를 사용한다.
 - npm test
-- node -e "const {validate} = require('./src/validate'); process.exit(validate(null) === false ? 0 : 1)"
-
-## Auto-checks
-# judge 호출 전 빠른 구조적 게이트.
 - npx tsc --noEmit
 - npm run lint
 
@@ -387,9 +381,9 @@ flowchart TD
     end
 
     subgraph GV["평가 차 — Gulf of Evaluation"]
-        RUBRIC["RUBRIC.md\nContracts · Auto-checks · Criteria"]
-        G1{"Gate 1\n구조적\nAuto-checks"}
-        G2{"Gate 2\n행동적 Judge\nContracts + Source → LLM"}
+        RUBRIC["RUBRIC.md\nChecks · Criteria"]
+        G1{"Checks 게이트\n실패 → 재주입\n통과 → LLM 증거"}
+        G2{"Judge\nChecks 출력 + Source → LLM"}
         G3{"Gate 3\nHITL\n또는 전략 리셋"}
     end
 
@@ -420,7 +414,7 @@ flowchart TD
 | 모드 | 예지 차 대응 | Gate 3 동작 | 브랜치 전략 | 언제 쓰는가 |
 |------|------------|------------|------------|------------|
 | **align** | gulf-align.md 저장 | — (루프 아님) | — | 루프 시작 전 갭 표면화 |
-| **기본** | gulf-align.md 읽기 | 없음 (Gate 1만) | 현재 브랜치 | 테스트가 충분해 autochecks로 커버 가능할 때 |
+| **기본** | gulf-align.md 읽기 | 없음 (judge 없음) | 현재 브랜치 | 테스트가 충분해 autochecks로 커버 가능할 때 |
 | **Judge** | gulf-align.md 읽기 | HITL 일시정지 | 현재 브랜치 | 코드 품질·설계 기준이 중요하고 사람이 개입 가능할 때 |
 | **자율** | gulf-align.md 읽기 | 전략 리셋 | 전용 브랜치 + 자동 merge | 무인 장시간 실행이 필요할 때 |
 | **병렬** | gulf-align.md 읽기 | 전략 리셋 × N | N개 worktree + 직렬 merge | 동일 목표를 병렬 전략으로 탐색할 때 |
@@ -450,20 +444,20 @@ Stop 이벤트
 
 ### Judge 모드
 
-**완료 조건**: Auto-checks 통과 **AND** Claude Opus judge APPROVED
+**완료 조건**: Checks 통과 **AND** Claude Opus judge APPROVED
 
 **트레이드오프**: 매 반복 Opus API 호출 비용이 든다. HITL 게이트가 있어 사람이 개입해야 하는 순간이 생긴다. 느리지만 정확도가 높다.
 
 #### Stop hook 흐름 — Judge 모드
 ```
 Stop 이벤트
-  ├── [Gate 1] RUBRIC.md ## Auto-checks 실행
+  ├── [Checks 게이트] RUBRIC.md ## Checks 실행
   │     실패 → 실패 상세와 함께 재주입 (Opus 호출 없음)
-  │     통과 ↓
-  ├── [Gate 2] 행동적 Judge
-  │     ## Behavioral contracts 실행 → 종료 코드 + 출력 수집
-  │     변경된 소스 파일 읽기 (diff가 아닌 실제 내용)
-  │     Claude Opus 평가: 증거 + ## Judge criteria
+  │     통과 → 출력이 LLM 행동적 증거가 됨 ↓
+  ├── [Judge] Claude Opus 평가:
+  │     - ## Checks 출력 (행동적 증거)
+  │     - 변경된 소스 파일 (diff가 아닌 실제 내용)
+  │     - ## Judge criteria
   │     APPROVED → 종료 (자율 모드면 _try_merge)
   │     REJECTED → JUDGE_FEEDBACK.md에 기록, 이유와 함께 재주입
   │     N번 연속 거절 → HITL 일시정지 (자율 모드면 전략 리셋)
@@ -700,7 +694,7 @@ cd gulf-loop
 | 완료 판정 주체 | 작업 에이전트 본인 | 별도 Opus judge (judge 모드) |
 | 루프 패턴 | ReAct | ReAct + Reflexion |
 | 실행 차 대응 | 없음 | Phase 프레임워크 + 언어 트리거 매 반복 주입 |
-| 평가 차 대응 | 완료 약속만 | RUBRIC.md + behavioral contracts + judge + JUDGE_FEEDBACK.md |
+| 평가 차 대응 | 완료 약속만 | RUBRIC.md + checks (이중 역할 게이트+증거) + judge + JUDGE_FEEDBACK.md |
 | 메모리 구조 | 없음 | 3축 메모리 (Working/Experiential/Factual) |
 | HITL | 없음 | 핵심 설계 — 평가 수렴 실패 시 인간에게 제어권 |
 | 자율 모드 | 없음 | 브랜치 기반, 자동 merge, 전략 리셋 |

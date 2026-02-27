@@ -108,22 +108,22 @@ install_commands() {
   _write_command "gulf-loop:start" \
     "Start a Gulf Loop — autonomous iterative development until the completion promise is output" \
     "PROMPT [--max-iterations N] [--completion-promise TEXT]" \
-    "setup-loop.sh"
+    "setup.sh" "--mode basic"
 
   _write_command "gulf-loop:start-with-judge" \
-    "Start a Gulf Loop with LLM Judge — completes only when auto-checks pass AND Claude Opus approves" \
+    "Start a Gulf Loop with LLM Judge — completes only when checks pass AND Claude Opus approves" \
     "PROMPT [--max-iterations N] [--hitl-threshold N]" \
-    "setup-judge.sh"
+    "setup.sh" "--mode judge"
 
   _write_command "gulf-loop:start-autonomous" \
     "Start a fully autonomous Gulf Loop — no HITL, branch-based, auto-merges on completion" \
     "PROMPT [--max-iterations N] [--base-branch BRANCH] [--with-judge] [--hitl-threshold N]" \
-    "setup-autonomous.sh"
+    "setup.sh" "--mode autonomous"
 
   _write_command "gulf-loop:start-parallel" \
     "Set up N parallel autonomous Gulf Loops in separate git worktrees" \
     "PROMPT --workers N [--max-iterations N] [--base-branch BRANCH] [--with-judge]" \
-    "setup-parallel.sh"
+    "setup.sh" "--mode parallel"
 
   # align command — needs Read + Write in addition to Bash
   cat > "${COMMANDS_DIR}/gulf-loop:align.md" <<CMDEOF
@@ -158,7 +158,7 @@ CMDEOF
 }
 
 _write_command() {
-  local name="$1" desc="$2" hint="$3" script="$4"
+  local name="$1" desc="$2" hint="$3" script="$4" mode_arg="${5:-}"
   local src_name="${name#gulf-loop:}"
 
   # Write frontmatter
@@ -264,10 +264,7 @@ verify() {
   }
 
   _check "${INSTALL_DIR}/hooks/stop-hook.sh"
-  _check "${INSTALL_DIR}/scripts/setup-loop.sh"
-  _check "${INSTALL_DIR}/scripts/setup-judge.sh"
-  _check "${INSTALL_DIR}/scripts/setup-autonomous.sh"
-  _check "${INSTALL_DIR}/scripts/setup-parallel.sh"
+  _check "${INSTALL_DIR}/scripts/setup.sh"
   _check "${INSTALL_DIR}/scripts/run-align.sh"
   _check "${INSTALL_DIR}/prompts/framework.md"
   _check "${COMMANDS_DIR}/gulf-loop:align.md"

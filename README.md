@@ -181,7 +181,7 @@ Systematized failure patterns from agent loop research, and gulf-loop's response
 | **Context Pressure Collapse** | Reasoning context lost after 75% compaction | Retries previously rejected approach | max_iterations limit, concise progress.txt |
 | **Convergence Failure** | Undoes previous iteration's work | 2 steps forward, 1 step back | Phase 0 mandatory, progress.txt check |
 | **Metric Gaming** | Takes shortcuts to produce completion signal | Deletes tests, hardcodes, stubs | Phase 999 invariants |
-| **Premature Completion** | Claims done without verification | Outputs signal before criteria met | autochecks.sh, judge gate |
+| **Premature Completion** | Claims done without verification | Outputs signal before criteria met | autochecks.sh (basic), checks gate (judge) |
 | **Cold-start Bloat** | Excessive reading in Phase 0 | >20% context budget on Orient | Phase 0 budget ≤20% rule |
 
 ---
@@ -215,13 +215,10 @@ Both are **judgments that cannot be automated**. The HITL gate triggering is nor
 
 Implicit completion criteria are the cause of evaluation gaps. RUBRIC.md defines this in three layers:
 
-- **Auto-checks**: fast structural gate run before the judge (tests, type checks, lint) — exit code only
-- **Behavioral contracts**: shell commands executed *inside* the judge, whose output the LLM interprets — what the code *does*, not just whether it compiles
-- **Judge criteria**: natural-language requirements the LLM evaluates against behavioral evidence + source
+- **Checks**: shell commands that serve a dual role — fast gate (any fail → no Opus call, loop re-injects immediately) and LLM behavioral evidence (output fed to judge when all pass)
+- **Judge criteria**: natural-language requirements the LLM evaluates against check output + source files
 
-Each layer catches different failure modes. Auto-checks catch structural breakage cheaply. Behavioral contracts catch interface violations and silent failures that tests miss. Judge criteria catch design-level problems that neither machine can directly observe.
-
-Order matters: give structural checks to the machine first, behavioral evidence second, interpretive judgment last.
+Two layers, clear separation: give behavioral evidence to the machine first, interpretive judgment last.
 
 ### Principle 4: Evaluation history must persist
 
@@ -280,15 +277,13 @@ model: claude-opus-4-6
 hitl_threshold: 5
 ---
 
-## Behavioral contracts
-# Executed by the judge — exit code + output becomes LLM evidence.
+## Checks
+# Dual role: fast gate (any fail → re-inject, no Opus call) + LLM behavioral evidence.
+# Use commands that produce meaningful output on failure.
 - npm test
-- node -e "const {validate} = require('./src/validate'); process.exit(validate(null) === false ? 0 : 1)"
-
-## Auto-checks
-# Fast gate run before judge — structural checks only.
 - npx tsc --noEmit
 - npm run lint
+- node -e "const {validate} = require('./src/validate'); process.exit(validate(null) === false ? 0 : 1)"
 
 ## Judge criteria
 - Every function has a single, clear responsibility.
@@ -379,9 +374,9 @@ flowchart TD
     end
 
     subgraph GV["Gulf of Evaluation"]
-        RUBRIC["RUBRIC.md\nContracts · Auto-checks · Criteria"]
-        G1{"Gate 1\nStructural\nAuto-checks"}
-        G2{"Gate 2\nBehavioral Judge\nContracts + Source → LLM"}
+        RUBRIC["RUBRIC.md\nChecks · Criteria"]
+        G1{"Checks Gate\nFast fail → re-inject\nPass → LLM evidence"}
+        G2{"Judge\nChecks output + Source → LLM"}
         G3{"Gate 3\nHITL\nor strategy reset"}
     end
 
@@ -412,7 +407,7 @@ The three modes are not different systems. They are the same stop hook with diff
 | Mode | Envisioning | Gate 3 | Branch strategy | When to use |
 |------|-------------|--------|----------------|-------------|
 | **align** | saves gulf-align.md | — (not a loop) | — | Surface gaps before the loop |
-| **basic** | reads gulf-align.md | none (Gate 1 only) | current branch | When tests are sufficient to cover completion |
+| **basic** | reads gulf-align.md | none (no judge) | current branch | When tests are sufficient to cover completion |
 | **judge** | reads gulf-align.md | HITL pause | current branch | When code quality/design criteria matter and human can intervene |
 | **autonomous** | reads gulf-align.md | strategy reset | dedicated branch + auto-merge | When unattended long-running execution is needed |
 | **parallel** | reads gulf-align.md | strategy reset × N | N worktrees + serialized merge | When exploring the same goal with parallel strategies |
@@ -429,7 +424,7 @@ The three modes are not different systems. They are the same stop hook with diff
 
 ### Judge mode
 
-**Completion condition**: auto-checks pass **AND** Claude Opus judge APPROVED
+**Completion condition**: checks pass **AND** Claude Opus judge APPROVED
 
 **Trade-off**: Opus API cost on every iteration. HITL gate creates moments requiring human intervention. Slower, but higher accuracy.
 
@@ -457,13 +452,13 @@ Stop event
 #### Judge mode
 ```
 Stop event
-  ├── [Gate 1] Run RUBRIC.md ## Auto-checks
+  ├── [Checks Gate] Run RUBRIC.md ## Checks
   │     Any fail → re-inject with failure details (no Opus call)
-  │     All pass ↓
-  ├── [Gate 2] Behavioral Judge
-  │     Execute ## Behavioral contracts → collect exit codes + output
-  │     Read changed source files (actual content, not diff)
-  │     Claude Opus evaluates: evidence + ## Judge criteria
+  │     All pass → output becomes LLM behavioral evidence ↓
+  ├── [Judge] Claude Opus evaluates:
+  │     - ## Checks output (behavioral evidence)
+  │     - changed source files (actual content, not diff)
+  │     - ## Judge criteria
   │     APPROVED → stop (or _try_merge if autonomous)
   │     REJECTED → write JUDGE_FEEDBACK.md, re-inject with reason
   │     N consecutive rejections → HITL pause (or strategy reset if autonomous)
@@ -614,7 +609,7 @@ Optionally, add `.claude/autochecks.sh` to your project. If present and executab
 
 ### Judge mode (Gulf of Evaluation fully activated)
 
-Completion = auto-checks pass **AND** Opus judge approves.
+Completion = checks pass **AND** Opus judge approves.
 
 Create `RUBRIC.md` first (see `RUBRIC.example.md`), then:
 
@@ -718,14 +713,10 @@ hitl_threshold: 5
 ## Envisioning
 <!-- Optional. Filled by /gulf-loop:align. -->
 
-## Behavioral contracts
-# Executed inside the judge — output becomes LLM evidence.
-# Use commands that produce meaningful output when they fail.
+## Checks
+# Dual role: fast gate (any fail → re-inject, no Opus call) + LLM behavioral evidence.
+# Use commands that produce meaningful output on failure.
 - npm test
-- node -e "const {fn} = require('./src'); process.exit(fn(null) === false ? 0 : 1)"
-
-## Auto-checks
-# Fast gate before judge call — structural checks only.
 - npx tsc --noEmit
 - npm run lint
 
@@ -751,7 +742,7 @@ Same Stop hook architecture. ralph-wiggum's core is a 96-line stop hook — dete
 | Completion arbiter | Working agent itself | Separate Opus judge (judge mode) |
 | Loop pattern | ReAct | ReAct + Reflexion |
 | Gulf of Execution | None | Phase framework + language triggers every iteration |
-| Gulf of Evaluation | Completion promise only | RUBRIC.md + behavioral contracts + judge + JUDGE_FEEDBACK.md |
+| Gulf of Evaluation | Completion promise only | RUBRIC.md + checks (dual-role gate + evidence) + judge + JUDGE_FEEDBACK.md |
 | Gulf of Envisioning | None | `/gulf-loop:align` + gulf-align.md |
 | Memory structure | None | 4-layer (Alignment/Working/Experiential/Factual) |
 | HITL | None | Core design — hands control to human when evaluation diverges |
