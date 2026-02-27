@@ -1,26 +1,156 @@
 # gulf-loop
 
-Claude Code plugin implementing the **Ralph Loop** (Ralph Wiggum technique) — autonomous iterative development via the Stop hook.
-
-> Named after Ralph Wiggum (The Simpsons): *"clueless yet relentlessly persistent"*
+Claude Code plugin that brings **Human-in-the-Loop** design into the Ralph Loop pattern,
+structured around the HCI concept of execution and evaluation gulfs.
 
 ---
 
-## What is the Ralph Loop?
+## The concept
 
-Instead of one long session where context accumulates until it degrades, the Ralph Loop repeats short, focused iterations.
+Donald Norman's *The Design of Everyday Things* defines two gaps that arise whenever a person interacts with a system:
+
+**Gulf of Execution** — the gap between *what the person intends* and *what actions the system makes available*.
+> "I want to build an auth module. But how do I express that to the agent in a way it actually executes correctly?"
+
+**Gulf of Evaluation** — the gap between *what the system produced* and *whether the person can tell if it's what they wanted*.
+> "The loop ran 20 iterations and says it's done. But is it actually right?"
+
+The original Ralph Loop (and `anthropics/ralph-wiggum`) is a loop mechanism. It solves the *persistence* problem — how to make Claude keep working. But it doesn't explicitly address who evaluates the output and when.
+
+**gulf-loop** is a Ralph Loop implementation designed around closing both gulfs, with a human explicitly placed in the evaluation path.
+
+---
+
+## Design philosophy
 
 ```
-Re-inject PROMPT ◄── Stop hook intercepts ◄── Claude finishes responding
-        │                                               │
-        └───────────────────────────────────────────────┘
-                  No completion signal? → continue
-                  Signal found? → exit loop
+Gulf of Execution                    Gulf of Evaluation
+─────────────────                    ──────────────────
+User intent → PROMPT.md              System output → Is it right?
+     │                                      │
+     ▼                                      ▼
+Phase framework                       RUBRIC.md criteria
+(how agent executes)                  (what "done" means)
+     │                                      │
+     ▼                                      ▼
+Agent iterates                        Judge evaluates
+     │                                      │
+     └──────────────── HITL ───────────────┘
+               Human in the loop
+               (when evaluation diverges)
 ```
 
-- **State lives on disk**, not in the LLM context window — files, git history, `progress.txt`
-- **Each iteration** = one atomic unit of work → validate → commit → repeat
-- **Context rot eliminated** — every iteration starts fresh against the current codebase state
+The **HITL gate** is not a safety net — it is the intended design. The loop is expected to surface the moments where human judgment is necessary and cannot be automated away.
+
+---
+
+## What is currently implemented
+
+### Gulf of Evaluation (well-covered)
+
+**RUBRIC.md** — makes evaluation criteria explicit and machine-readable.
+```markdown
+## Auto-checks           ← objective gate (exit codes)
+- npm test
+- npx tsc --noEmit
+
+## Judge criteria         ← subjective gate (LLM evaluation)
+- Functions have single responsibility.
+- No silent error handling.
+```
+
+**Claude Opus as judge** — a separate model instance evaluates every iteration against the rubric. The working agent and the evaluator are decoupled.
+
+**JUDGE_FEEDBACK.md** — every rejection is written to disk with timestamp and reason. The agent reads this on Phase 0 of every subsequent iteration. The evaluation history is visible and persistent.
+
+**HITL gate** — after N consecutive rejections, the loop pauses. This surfaces the moments where automated evaluation is failing, and inverts control to the human: update the rubric, refine the criteria, or redirect the agent.
+
+```
+Iteration N: REJECTED — "validateEmail doesn't handle empty strings"
+Iteration N+1: REJECTED — "createUser has silent catch block"
+Iteration N+2: REJECTED — "still silent catch block"
+...
+Iteration N+4: → HITL PAUSE
+               Human reviews JUDGE_FEEDBACK.md
+               Human updates RUBRIC.md or redirects agent
+               /gulf-loop:resume
+```
+
+### Gulf of Execution (partially covered)
+
+**Phase framework** — injected into every iteration to structure how the agent executes:
+```
+Phase 0: Orient before acting (git log, tests, progress.txt)
+Phase 1–4: One atomic unit per iteration, validated, committed
+Phase 999+: Invariants that cannot be violated
+```
+
+**Language triggers** — baked into the framework prompt:
+
+| Trigger | Effect |
+|---------|--------|
+| `study` the file | Deeper analysis before acting |
+| `DO NOT ASSUME not implemented` | Prevents reimplementing existing code |
+| `capture the why` | Documents reasoning, not just code |
+| `Ultrathink` | Extended reasoning for complex design decisions |
+
+**Anti-cheating rules** — injected every iteration:
+```
+NEVER modify, delete, or skip existing tests
+NEVER hard-code values for specific test inputs
+NEVER output placeholders or stubs
+```
+
+---
+
+## What is not yet implemented (execution gulf gap)
+
+The execution gulf has a structural gap: there is currently **no alignment phase** before the loop starts.
+
+The user writes a PROMPT. The loop starts. There is no explicit check that the agent interpreted the intent correctly before executing 20 iterations.
+
+### Planned: `/gulf-loop:align`
+
+A pre-loop command where the agent reads the PROMPT and surfaces its execution plan for human confirmation before the loop starts.
+
+```bash
+/gulf-loop:align "$(cat PROMPT.md)"
+# Agent outputs:
+# "I understand the goal as: [restatement]
+#  My execution plan: [step breakdown]
+#  Assumptions I'm making: [list]
+#  Confirm to start the loop, or correct my understanding."
+```
+
+This closes the execution gulf before it becomes a cost problem.
+
+### Planned: `milestone_every` — proactive HITL checkpoints
+
+Currently, the HITL gate is **reactive** — it triggers only after evaluation fails N times.
+
+A proactive checkpoint would pause the loop at regular intervals for human evaluation, independent of judge outcomes.
+
+```yaml
+---
+active: true
+iteration: 7
+milestone_every: 5        # pause every 5 iterations for human review
+---
+```
+
+At iteration 5 and 10 and 15: loop pauses, shows progress summary, waits for `/gulf-loop:resume`.
+
+### Planned: `EXECUTION_LOG.md`
+
+A convention where the agent writes its understanding of the remaining execution gap after each iteration:
+```markdown
+## Iteration 4
+Completed: user creation endpoint, input validation
+Remaining: password hashing (not yet started), tests for edge cases
+Gap I see: unclear whether to use bcrypt or argon2 — need spec
+```
+
+This makes the execution gap visible to the human across iterations, not just at HITL pause moments.
 
 ---
 
@@ -32,156 +162,72 @@ cd gulf-loop
 ./install.sh
 ```
 
-Then restart Claude Code.
-
-### Uninstall
+Restart Claude Code after install.
 
 ```bash
-./install.sh --uninstall
+./install.sh --uninstall   # remove completely
 ```
 
 **Requirements**: Claude Code ≥ 1.0.33, `jq`
 
 ---
 
-## Quick Start
+## Usage
 
 ### Basic mode
 
+Completion = agent outputs `<promise>COMPLETE</promise>`.
+
 ```bash
-/gulf-loop:start "Build a REST API for todos with CRUD and tests.
-Output <promise>COMPLETE</promise> when all tests pass and tsc --noEmit is clean." \
-  --max-iterations 30
+/gulf-loop:start "$(cat PROMPT.md)" --max-iterations 30
 ```
 
-### From a PROMPT.md file
+### Judge mode (Gulf of Evaluation fully activated)
+
+Completion = auto-checks pass **AND** Opus judge approves.
+
+Create `RUBRIC.md` first (see `RUBRIC.example.md`), then:
 
 ```bash
-/gulf-loop:start "$(cat PROMPT.md)" --max-iterations 50
-```
-
-### Judge mode (with RUBRIC.md)
-
-```bash
-/gulf-loop:start-with-judge "Build the auth module." \
+/gulf-loop:start-with-judge "$(cat PROMPT.md)" \
   --max-iterations 30 \
   --hitl-threshold 5
 ```
 
----
-
-## Commands
+### Commands
 
 | Command | Description |
 |---------|-------------|
-| `/gulf-loop:start PROMPT [OPTIONS]` | Start the loop |
-| `/gulf-loop:start-with-judge PROMPT [OPTIONS]` | Start with LLM judge gate |
-| `/gulf-loop:status` | Show current iteration count |
+| `/gulf-loop:start PROMPT [--max-iterations N] [--completion-promise TEXT]` | Basic loop |
+| `/gulf-loop:start-with-judge PROMPT [--max-iterations N] [--hitl-threshold N]` | Loop with judge |
+| `/gulf-loop:status` | Current iteration count |
 | `/gulf-loop:cancel` | Stop the loop |
 | `/gulf-loop:resume` | Resume after HITL pause |
 
-### Options for `:start`
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--max-iterations N` | `50` | Hard cap on iterations (cost safety) |
-| `--completion-promise TEXT` | `COMPLETE` | String that ends the loop |
-
-### Additional options for `:start-with-judge`
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--hitl-threshold N` | `5` | Consecutive rejections before HITL pause |
-
 ---
 
-## How it works
+## Stop hook flow
 
 ### Normal mode
-
-The Stop hook fires on every Claude exit. If `<promise>COMPLETE</promise>` is not found in the last message, the hook re-injects the original prompt and Claude continues.
-
 ```
 Stop event
-  │
   ├── No state file → allow stop
-  ├── iteration >= max_iterations → cleanup, allow stop
-  ├── <promise>COMPLETE</promise> found → cleanup, allow stop
+  ├── iteration >= max_iterations → stop
+  ├── <promise>COMPLETE</promise> in last message → stop
   └── Otherwise → increment iteration, re-inject prompt + framework
 ```
 
 ### Judge mode
-
-Adds two verification gates before the loop can end:
-
 ```
 Stop event
-  │
-  ├── [Gate 1] Run auto-checks from RUBRIC.md
+  ├── [Gate 1] Run RUBRIC.md ## Auto-checks
   │     Any fail → re-inject with failure details
   │     All pass ↓
   ├── [Gate 2] Claude Opus evaluates RUBRIC.md ## Judge criteria
+  │     APPROVED → stop
   │     REJECTED → write JUDGE_FEEDBACK.md, re-inject with reason
-  │     N consecutive rejections → HITL pause (loop suspends)
-  │     APPROVED → cleanup, allow stop
+  │     N consecutive rejections → HITL pause (active: false)
 ```
-
-### State file (`.claude/gulf-loop.local.md`)
-
-```yaml
----
-active: true
-iteration: 3
-max_iterations: 50
-completion_promise: "COMPLETE"
-# Judge mode only:
-judge_enabled: true
-consecutive_rejections: 1
-hitl_threshold: 5
----
-[original prompt text]
-```
-
-The Stop hook reads the prompt from this file and re-injects it as the `reason` field on every iteration. The file is gitignored automatically on install.
-
----
-
-## Agent framework (injected every iteration)
-
-Every re-injection includes the Gulf Loop framework alongside the original prompt:
-
-### Phase 0 — Orient (≤20% of context budget)
-```
-git log --oneline -10       # what changed recently
-[test command]              # current pass/fail status
-cat progress.txt            # learnings from previous iterations
-cat JUDGE_FEEDBACK.md       # judge mode: what was rejected and why
-```
-
-### Phase 1–4 — Execute (one atomic unit per iteration)
-1. Pick next incomplete task from spec
-2. **Search before building** — `DO NOT ASSUME NOT IMPLEMENTED`
-3. Implement completely — `DO NOT IMPLEMENT PLACEHOLDERS`
-4. Run validation: `npm test && npm run lint && npx tsc --noEmit`
-5. All pass → `git add -A && git commit -m "feat: [task]"`
-6. Append to `progress.txt`: what was done, what was learned, what is next
-
-### Phase 999+ — Invariants (never violate)
-```
-999. NEVER modify, delete, or skip existing tests
-999. NEVER hard-code values for specific test inputs
-999. NEVER implement placeholders or stubs
-999. NEVER output the completion signal unless ALL criteria are verified
-```
-
-### Language triggers that improve agent performance
-
-| Use this | Instead of | Effect |
-|----------|-----------|--------|
-| `study` the file | `read` the file | Deeper analysis mode |
-| `DO NOT ASSUME not implemented` | (implicit) | Prevents code duplication |
-| `capture the why` | `add a comment` | Documents reasoning |
-| `Ultrathink` | `think carefully` | Extended reasoning mode |
 
 ---
 
@@ -193,12 +239,12 @@ cat JUDGE_FEEDBACK.md       # judge mode: what was rejected and why
 
 ## Current State
 [Point to files/commands — the agent re-reads this every iteration.
-Do not embed the state directly; make it discoverable.]
+Make state discoverable, not embedded.]
 
 ## Acceptance Criteria
 - [ ] npm test returns exit code 0
 - [ ] No TypeScript errors (tsc --noEmit)
-- [ ] ESLint clean (eslint . --max-warnings 0)
+- [ ] ESLint clean
 
 ## Phase 0 — Orient
 - Run: git log --oneline -10
@@ -207,7 +253,7 @@ Do not embed the state directly; make it discoverable.]
 
 ## Phase 1–4 — Execute
 1. Pick next incomplete task
-2. Search codebase first — DO NOT ASSUME NOT IMPLEMENTED
+2. Search first — DO NOT ASSUME NOT IMPLEMENTED
 3. Implement completely — NO PLACEHOLDERS
 4. Run: npm test && npm run lint && npx tsc --noEmit
 5. On all pass: git commit -m "feat: [task]"
@@ -215,7 +261,7 @@ Do not embed the state directly; make it discoverable.]
 
 ## Phase 999 — Invariants
 999. NEVER modify, delete, or skip existing tests
-999. NEVER hard-code values for specific test inputs
+999. NEVER hard-code values
 999. NEVER implement placeholders
 
 Output <promise>COMPLETE</promise> ONLY when ALL acceptance criteria above pass.
@@ -223,7 +269,7 @@ Output <promise>COMPLETE</promise> ONLY when ALL acceptance criteria above pass.
 
 ---
 
-## RUBRIC.md (Judge mode)
+## RUBRIC.md template
 
 ```markdown
 ---
@@ -244,73 +290,37 @@ hitl_threshold: 5
 - Edge cases (null, empty, boundary values) are handled explicitly.
 ```
 
-See `RUBRIC.example.md` for a full template.
-
 ---
 
-## How gulf-loop differs from existing Ralph implementations
+## Relation to existing Ralph Loop implementations
 
-Ralph Loop has two architectures:
+### vs `anthropics/ralph-wiggum`
 
-| | **External bash loop** | **Stop hook plugin** |
-|---|---|---|
-| Examples | `snarktank/ralph` | `anthropics/ralph-wiggum`, **gulf-loop** |
-| Context per iteration | Fully reset (new `claude` process) | Accumulates within session |
-| Best for | 100+ iterations | ≤50 iterations |
-| Mechanism | `while :; do cat PROMPT.md \| claude; done` | Stop hook blocks exit |
-
-gulf-loop uses the same Stop hook architecture as `anthropics/ralph-wiggum`. Differences:
+Same Stop hook architecture. gulf-loop adds:
 
 | | ralph-wiggum | gulf-loop |
 |---|---|---|
-| Completion detection | Parses JSONL transcript | `last_assistant_message` field (simpler) |
-| Agent framework | Minimal | Phase 0/1–4/999+ injected every iteration |
-| Anti-cheating rules | User writes in PROMPT | Built into re-injected framework |
-| Planning trigger | Not included | Included (+20% SWE-bench, OpenAI research) |
-| Judge mode | No | Yes (auto-checks + Opus LLM judge) |
-| HITL gate | No | Yes (N consecutive rejections → pause) |
-| Commands | 3 | 5 (adds `:status`, `:resume`) |
+| Design framing | Loop mechanism | HCI gulf-aware loop |
+| Gulf of Execution | Minimal | Phase framework + language triggers injected every iteration |
+| Gulf of Evaluation | Completion promise only | RUBRIC.md + Opus judge + JUDGE_FEEDBACK.md |
+| HITL | Not present | Core design — proactive pause on evaluation divergence |
+| Completion detection | JSONL transcript parsing | `last_assistant_message` field |
 
----
+### vs `snarktank/ralph` (external bash loop)
 
-## Common pitfalls
+Different architecture. External loop = completely fresh context each iteration. Stop hook loop = same session.
 
-| Risk | Mitigation |
-|------|-----------|
-| Cost runaway | Always set `--max-iterations` (default: 50) |
-| A↔B oscillation | Log completed tasks to `progress.txt` each iteration |
-| Metric gaming | Run test suite outside agent control; use Judge mode |
-| Premature exit | Use machine-verifiable acceptance criteria |
-| 100+ iterations | Use external bash loop (see below) |
-| Context saturation | Keep each iteration to one atomic task |
-
----
-
-## External bash loop (100+ iterations)
-
-The Stop hook accumulates context in a single session. For long-running tasks, use the external bash loop — each invocation gets a completely fresh context window:
-
-```bash
-# Basic
-while :; do cat PROMPT.md | claude --dangerously-skip-permissions; done
-
-# With iteration cap and completion detection
-MAX=50; i=0
-while [ $i -lt $MAX ]; do
-  i=$((i+1))
-  echo "=== Iteration $i/$MAX ==="
-  grep -q "EXIT_SIGNAL" progress.txt 2>/dev/null && break
-  cat PROMPT.md | claude --dangerously-skip-permissions
-  git add -A && git commit -m "ralph: iter $i" 2>/dev/null || true
-done
-```
+| | snarktank/ralph | gulf-loop |
+|---|---|---|
+| Context per iteration | Fully reset | Accumulates |
+| Best for | 100+ iterations | ≤50 iterations |
+| Gulf awareness | Not a design goal | Core design goal |
 
 ---
 
 ## References
 
+- Norman, D. A. (1988). *The Design of Everyday Things*. — Gulf of Execution and Evaluation
 - [ghuntley.com/ralph](https://ghuntley.com/ralph) — Geoffrey Huntley, originator of the Ralph Loop technique
-- [snarktank/ralph](https://github.com/snarktank/ralph) — PRD-based external loop implementation
-- [anthropics/claude-code plugins/ralph-wiggum](https://github.com/anthropics/claude-code/tree/main/plugins/ralph-wiggum) — Official Anthropic Stop hook plugin
+- [anthropics/claude-code plugins/ralph-wiggum](https://github.com/anthropics/claude-code/tree/main/plugins/ralph-wiggum) — Official Stop hook plugin
 - [Claude Code Hooks](https://code.claude.com/docs/en/hooks) — Stop hook reference
-- [Claude Code Plugins](https://code.claude.com/docs/en/plugins) — Plugin development guide
