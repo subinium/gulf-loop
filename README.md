@@ -15,29 +15,39 @@ Donald Norman's *The Design of Everyday Things* defines two gaps that arise when
 **Gulf of Evaluation** — the gap between *what the system produced* and *whether the person can tell if it's what they wanted*.
 > "The loop ran 20 iterations and says it's done. But is it actually right?"
 
+Recent HCI research (Subramonyam et al., CHI 2024) identified a **third gulf** that precedes both:
+
+**Gulf of Envisioning** — the gap *before execution even starts*: can the person even envision what the LLM is capable of, and how to specify it correctly?
+> "I don't know what the agent can do, how to describe what I want, or what the output will look like."
+
+Three sub-gaps:
+- **Capability gap** — unclear what the LLM can and cannot do given the tools and context
+- **Instruction gap** — difficulty translating intent into a prompt the agent actually executes correctly
+- **Intentionality gap** — output format and quality are hard to predict before starting
+
 The original Ralph Loop (and `anthropics/ralph-wiggum`) is a loop mechanism. It solves the *persistence* problem — how to make Claude keep working. But it doesn't explicitly address who evaluates the output and when.
 
-**gulf-loop** is a Ralph Loop implementation designed around closing both gulfs, with a human explicitly placed in the evaluation path.
+**gulf-loop** is a Ralph Loop implementation designed around closing all three gulfs, with a human explicitly placed in the evaluation path.
 
 ---
 
 ## Design philosophy
 
 ```
-Gulf of Execution                    Gulf of Evaluation
-─────────────────                    ──────────────────
-User intent → PROMPT.md              System output → Is it right?
-     │                                      │
-     ▼                                      ▼
-Phase framework                       RUBRIC.md criteria
-(how agent executes)                  (what "done" means)
-     │                                      │
-     ▼                                      ▼
-Agent iterates                        Judge evaluates
-     │                                      │
-     └──────────────── HITL ───────────────┘
-               Human in the loop
-               (when evaluation diverges)
+Gulf of Envisioning         Gulf of Execution              Gulf of Evaluation
+───────────────────         ─────────────────              ──────────────────
+Can I envision this?        User intent → PROMPT.md        System output → Is it right?
+     │                           │                                │
+     ▼                           ▼                                ▼
+/gulf-loop:align           Phase framework                RUBRIC.md criteria
+gulf-align.md              (how agent executes)           (what "done" means)
+     │                           │                                │
+     ▼                           ▼                                ▼
+Gaps surfaced              Agent iterates                 Judge evaluates
+before loop starts              │                                │
+                                └───────────── HITL ────────────┘
+                                          Human in the loop
+                                          (when evaluation diverges)
 ```
 
 The **HITL gate** is not a safety net — it is the intended design. The loop is expected to surface the moments where human judgment is necessary and cannot be automated away.
@@ -60,6 +70,8 @@ The **HITL gate** is not a safety net — it is the intended design. The loop is
 ```
 
 **Claude Opus as judge** — a separate model instance evaluates every iteration against the rubric. The working agent and the evaluator are decoupled.
+
+Why decoupling matters: CHI 2025 research (Lee et al.) found that as trust in AI output increases, users' critical review effort *decreases* — the trust-evaluation paradox. An external judge that never ran the code is structurally immune to this bias. Separately, a 2025 METR randomized controlled trial (N=16 experienced developers, 246 tasks) found AI tools increased task completion time by 19% on average, despite developers *perceiving* a 20% speedup — a 39-percentage-point perception gap. Without an external evaluation gate, the loop has no protection against this effect.
 
 **JUDGE_FEEDBACK.md** — every rejection is written to disk with timestamp and reason. The agent reads this on Phase 0 of every subsequent iteration. The evaluation history is visible and persistent.
 
@@ -105,24 +117,41 @@ NEVER output placeholders or stubs
 
 ## What is not yet implemented (execution gulf gap)
 
-The execution gulf has a structural gap: there is currently **no alignment phase** before the loop starts.
+### `/gulf-loop:align` — now implemented
 
-The user writes a PROMPT. The loop starts. There is no explicit check that the agent interpreted the intent correctly before executing 20 iterations.
-
-### Planned: `/gulf-loop:align`
-
-A pre-loop command where the agent reads the PROMPT and surfaces its execution plan for human confirmation before the loop starts.
+A pre-loop command that addresses the Gulf of Envisioning before the loop starts. The agent reads `RUBRIC.md`, any existing source files, and outputs a 4-section alignment document saved to `.claude/gulf-align.md`:
 
 ```bash
-/gulf-loop:align "$(cat PROMPT.md)"
-# Agent outputs:
-# "I understand the goal as: [restatement]
-#  My execution plan: [step breakdown]
-#  Assumptions I'm making: [list]
-#  Confirm to start the loop, or correct my understanding."
+/gulf-loop:align
+# Agent outputs and saves gulf-align.md:
+#
+# ## Specification Alignment
+# Goal: [one-sentence deliverable]
+# Deliverables: [concrete artifact list]
+# Out of scope: [what will not be done]
+#
+# ## Process Alignment
+# Approach: [technical strategy]
+# Sequence: [ordered phases]
+#
+# ## Evaluation Alignment
+# Machine checks: [exact commands]
+# Edge cases: [boundary conditions]
+#
+# ## Gulf of Envisioning — Gap Check
+# Capability gaps: [uncertain abilities]
+# Instruction gaps: [ambiguous spec]
+# Intentionality gaps: [unpredictable design choices]
+# Blocking questions: [requires user clarification]
 ```
 
-This closes the execution gulf before it becomes a cost problem.
+Every subsequent loop iteration reads `gulf-align.md` in Phase 0 as the agreed execution-evaluation contract. Deviating without updating it is a convergence failure.
+
+Recommended workflow:
+```bash
+/gulf-loop:align                          # surfaces gaps first
+/gulf-loop:start-with-judge "$(cat PROMPT.md)"   # loop with evaluation
+```
 
 ### Planned: `milestone_every` — proactive HITL checkpoints
 
@@ -248,6 +277,7 @@ Then open each printed worktree path in a separate Claude Code session and run `
 
 | Command | Description |
 |---------|-------------|
+| `/gulf-loop:align` | **Run before starting** — surfaces envisioning/execution/evaluation gaps, saves `gulf-align.md` |
 | `/gulf-loop:start PROMPT [--max-iterations N] [--completion-promise TEXT]` | Basic loop |
 | `/gulf-loop:start-with-judge PROMPT [--max-iterations N] [--hitl-threshold N]` | Loop with judge |
 | `/gulf-loop:start-autonomous PROMPT [--max-iterations N] [--base-branch BRANCH] [--with-judge]` | Autonomous loop (no HITL) |
@@ -390,6 +420,11 @@ Different architecture. External loop = completely fresh context each iteration.
 ## References
 
 - Norman, D. A. (1988). *The Design of Everyday Things*. — Gulf of Execution and Evaluation
+- Subramonyam, H. et al. (2024). Bridging the Gulf of Envisioning. *CHI 2024*. arXiv:2309.14459 — Gulf of Envisioning
+- Terry, M. et al. (2023). Interactive AI Alignment: Specification, Process, and Evaluation Alignment. arXiv:2311.00710 — 3-axis alignment framework
+- Lee, H. et al. (2025). The Impact of Generative AI on Critical Thinking. *CHI 2025*. — Trust-evaluation paradox
+- Becker, J. et al. (METR, 2025). Measuring the Impact of Early-2025 AI on Experienced OSS Developer Productivity. arXiv:2507.09089 — 19% slower, 20% perceived speedup
+- Shinn, N. et al. (2023). Reflexion: Language Agents with Verbal Reinforcement Learning. arXiv:2303.11366 — Reflexion loop pattern
 - [ghuntley.com/ralph](https://ghuntley.com/ralph) — Geoffrey Huntley, originator of the Ralph Loop technique
 - [anthropics/claude-code plugins/ralph-wiggum](https://github.com/anthropics/claude-code/tree/main/plugins/ralph-wiggum) — Official Stop hook plugin
 - [Claude Code Hooks](https://code.claude.com/docs/en/hooks) — Stop hook reference

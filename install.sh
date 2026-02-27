@@ -125,11 +125,29 @@ install_commands() {
     "PROMPT --workers N [--max-iterations N] [--base-branch BRANCH] [--with-judge]" \
     "setup-parallel.sh"
 
+  # align command — needs Read + Write in addition to Bash
+  cat > "${COMMANDS_DIR}/gulf-loop:align.md" <<CMDEOF
+---
+description: "Run Gulf Alignment — surface envisioning/execution/evaluation gaps before starting the loop"
+argument-hint: "[RUBRIC.md path]"
+allowed-tools: ["Bash(${INSTALL_DIR}/scripts/run-align.sh:*)", "Read", "Write"]
+hide-from-slash-command-tool: "true"
+---
+
+CMDEOF
+  awk '/^---$/{c++;next} c>=2{print}' \
+    "${SOURCE_DIR}/commands/align.md" \
+    >> "${COMMANDS_DIR}/gulf-loop:align.md" 2>/dev/null || true
+  local tmp; tmp=$(mktemp)
+  sed "s|\${CLAUDE_PLUGIN_ROOT}|${INSTALL_DIR}|g" "${COMMANDS_DIR}/gulf-loop:align.md" > "$tmp" \
+    && mv "$tmp" "${COMMANDS_DIR}/gulf-loop:align.md"
+
   _write_simple_command "gulf-loop:cancel"  "Cancel the active Gulf Loop"                              "cancel-loop.sh"
   _write_simple_command "gulf-loop:status"  "Show current Gulf Loop iteration status"                  "status-loop.sh"
   _write_simple_command "gulf-loop:resume"  "Resume a Gulf Loop paused by the HITL gate"              "resume-loop.sh"
 
-  ok "7 slash commands → $COMMANDS_DIR"
+  ok "8 slash commands → $COMMANDS_DIR"
+  echo "    /gulf-loop:align  ← run before start (surfaces gaps)"
   echo "    /gulf-loop:start"
   echo "    /gulf-loop:start-with-judge"
   echo "    /gulf-loop:start-autonomous"
@@ -250,7 +268,9 @@ verify() {
   _check "${INSTALL_DIR}/scripts/setup-judge.sh"
   _check "${INSTALL_DIR}/scripts/setup-autonomous.sh"
   _check "${INSTALL_DIR}/scripts/setup-parallel.sh"
+  _check "${INSTALL_DIR}/scripts/run-align.sh"
   _check "${INSTALL_DIR}/prompts/framework.md"
+  _check "${COMMANDS_DIR}/gulf-loop:align.md"
   _check "${COMMANDS_DIR}/gulf-loop:start.md"
   _check "${COMMANDS_DIR}/gulf-loop:start-with-judge.md"
   _check "${COMMANDS_DIR}/gulf-loop:start-autonomous.md"

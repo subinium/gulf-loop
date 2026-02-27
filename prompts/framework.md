@@ -21,10 +21,15 @@ This is iteration {ITERATION} of {MAX_ITERATIONS}.
 Do NOT skip this. Use these commands to understand current state:
 
 ```
-git log --oneline -10          # what changed recently
-[test command]                 # current pass/fail status
-cat progress.txt 2>/dev/null   # learnings from previous iterations
+git log --oneline -10                       # what changed recently
+[test command]                              # current pass/fail status
+cat progress.txt 2>/dev/null               # learnings from previous iterations
+cat .claude/gulf-align.md 2>/dev/null      # pre-loop alignment doc (if run)
 ```
+
+If `.claude/gulf-align.md` exists, read it first — it contains the agreed-upon
+spec, process, and evaluation contract. Deviating from it without updating it
+is a convergence failure.
 
 Then identify: what is the next incomplete task?
 
@@ -71,9 +76,30 @@ Then identify: what is the next incomplete task?
 | All files on disk | Conversation history |
 | `git` history | Tool call results |
 | `progress.txt` | Any variable you set |
-| `JUDGE_FEEDBACK.md` (if judge mode) | Your current reasoning |
+| `.claude/gulf-align.md` (if align was run) | Your current reasoning |
+| `JUDGE_FEEDBACK.md` (if judge mode) | |
 
 Write to disk anything you need to remember.
+
+#### Structured `progress.txt` format (recommended)
+
+```
+ORIGINAL_GOAL: [copy from gulf-align.md or RUBRIC — never change this line]
+ITERATION: [N]
+
+COMPLETED:
+- [task A — what was done and why it was correct]
+- [task B — ...]
+
+REMAINING_GAP:
+- [next task — what still needs to happen]
+- [known blocker, if any]
+
+CONFIDENCE: [0–100 — honest estimate that all remaining work will pass evaluation]
+LAST_DECISION: [most important design choice made this iteration, with rationale]
+```
+
+Using a consistent format prevents goal drift across iterations (OnGoal, UIST 2025).
 
 ---
 

@@ -8,7 +8,7 @@ HCI의 실행 차(Gulf of Execution)와 평가 차(Gulf of Evaluation) 개념을
 ## 목차
 
 1. [왜 이걸 만들었는가](#1-왜-이걸-만들었는가)
-2. [두 개의 간극](#2-두-개의-간극)
+2. [세 개의 간극](#2-세-개의-간극)
 3. [이론적 배경](#3-이론적-배경)
 4. [핵심 설계 원칙](#4-핵심-설계-원칙)
 5. [구성 요소와 그 이유](#5-구성-요소와-그-이유)
@@ -52,9 +52,22 @@ gulf-loop는 이 문제를 정면으로 다룬다.
 
 ---
 
-## 2. 두 개의 간극
+## 2. 세 개의 간극
 
-Donald Norman의 *『디자인과 인간 심리(The Design of Everyday Things)』*(1988)는 사람이 시스템과 상호작용할 때 생기는 두 가지 근본적인 간극을 정의한다.
+Donald Norman의 *『디자인과 인간 심리(The Design of Everyday Things)』*(1988)는 사람이 시스템과 상호작용할 때 생기는 두 가지 근본적인 간극을 정의한다. 2024년 CHI 연구(Subramonyam et al.)는 LLM 도구에서 이 두 갭 **앞에** 존재하는 세 번째 갭을 새롭게 정의했다.
+
+### 예지 차 (Gulf of Envisioning) — 새로 정의된 갭
+
+*실행을 시작하기 전*, LLM이 무엇을 할 수 있는지조차 상상하기 어려운 간극.
+
+> "인증 모듈을 만들고 싶다. 그런데 에이전트가 내가 원하는 수준으로 실제로 만들 수 있는지 모르겠다. 뭐라고 설명해야 에이전트가 정확히 이해할지도 모르겠다. 완성된 결과물이 어떤 모습일지도 상상하기 어렵다."
+
+세 가지 하위 갭 (Subramonyam et al., CHI 2024):
+- **능력 갭** — LLM이 현재 도구와 컨텍스트로 무엇을 할 수 있는지 불명확
+- **지시 갭** — 의도를 에이전트가 올바르게 실행할 프롬프트로 변환하기 어려움
+- **의도성 갭** — 출력 결과의 형태와 품질을 시작 전에 예측하기 어려움
+
+`/gulf-loop:align`이 이 갭을 루프 시작 전에 해소한다.
 
 ### 실행 차 (Gulf of Execution)
 
@@ -68,11 +81,14 @@ Donald Norman의 *『디자인과 인간 심리(The Design of Everyday Things)�
 
 > "루프가 20번 돌고 완료됐다고 한다. 테스트는 통과한다. 그런데 이게 실제로 내가 원하던 거야? 함수들이 단일 책임을 갖고 있나? 에러를 조용히 삼키는 코드가 없나? 나중에 유지보수하기 어려운 구조로 짜인 건 아닌가?"
 
+평가 차를 방치하면 어떤 일이 생기는가: CHI 2025 연구(Lee et al., 319명 실험)에 따르면 AI 신뢰도가 높아질수록 사용자의 비판적 검토 노력이 감소한다. AI를 믿을수록 출력을 덜 검증한다 — **신뢰-평가 역설**이다. METR의 2025 RCT(숙련 OSS 개발자 16명, 246개 태스크)는 AI 도구가 작업 완료 시간을 평균 19% 증가시켰지만 개발자들은 20% 빨라졌다고 인식했다 — 39%p 인식 갭. 외부 judge가 없으면 루프는 이 효과에서 자유롭지 않다.
+
 ### AI 에이전트 맥락에서의 재해석
 
 에이전트 루프에서:
 
-- **실행 차** = 사람의 의도가 에이전트의 실행 방식으로 제대로 전환되지 못하는 간극. 프롬프트에 "인증 모듈 만들어"라고 써도, 에이전트가 Phase 없이 즉흥적으로 작업하거나, 기존 코드를 확인하지 않고 재구현하거나, 한 반복에 너무 많은 것을 하려다 망가뜨리는 것.
+- **예지 차** = 루프 시작 전, 에이전트가 작업을 할 수 있는지·어떻게 표현해야 하는지 불명확한 간극. 잘못 표현된 PROMPT는 방향 자체가 틀린 반복을 20번 만든다.
+- **실행 차** = 사람의 의도가 에이전트의 실행 방식으로 제대로 전환되지 못하는 간극. 에이전트가 Phase 없이 즉흥적으로 작업하거나, 기존 코드를 확인하지 않고 재구현하거나, 한 반복에 너무 많은 것을 하려다 망가뜨리는 것.
 - **평가 차** = 에이전트가 완료라고 했지만 사람이 그게 실제로 올바른지 판단하기 어려운 간극. 테스트가 통과한다고 코드가 좋은 건 아니다. "완료"와 "올바름"은 다르다.
 
 ---
@@ -90,7 +106,20 @@ Donald Norman의 *『디자인과 인간 심리(The Design of Everyday Things)�
 | **Reflexion** | 실행 → 평가 → 언어적 실패 분석 → 재시도 | SWE-agent w/ retry | judge 거절 사이클 전체 |
 | **Tree of Thoughts** | k개 후보 경로 생성 → 평가 → 탐색 | o3-style 추론 | 병렬 모드의 개념적 기반 |
 
-gulf-loop는 **ReAct 기반의 Reflexion 강화 루프**다. Phase 0–4가 ReAct의 생각-행동-관찰 구조고, judge 거절 → JUDGE_FEEDBACK.md → 재주입이 Reflexion이다.
+gulf-loop는 **ReAct 기반의 Reflexion 강화 루프**다. Phase 0–4가 ReAct의 생각-행동-관찰 구조고, judge 거절 → JUDGE_FEEDBACK.md → 재주입이 Reflexion이다. `/gulf-loop:align`이 루프 전 예지 차를 해소하는 사전 정렬 단계다.
+
+### Gulf of Envisioning — 세 번째 갭
+
+Subramonyam et al.(CHI 2024, arXiv:2309.14459)은 Norman의 두 갭 앞에 LLM 특유의 세 번째 갭이 있다는 것을 실증했다. Terry et al.(2023, arXiv:2311.00710)은 AI 상호작용을 3차원으로 구조화했다:
+
+| 축 | 갭 | gulf-loop 대응 |
+|----|----|----------------|
+| **명세 정렬** | 무엇을 할지 (실행 차) | PROMPT.md + Phase 프레임워크 |
+| **프로세스 정렬** | 어떻게 할지 | Phase 0–4 구조 |
+| **평가 정렬** | 출력을 어떻게 검증할지 (평가 차) | RUBRIC.md + judge |
+| **예지 정렬** | 할 수 있는지조차 불명확 (예지 차) | `/gulf-loop:align` + gulf-align.md |
+
+gulf-loop는 이 4가지 차원 모두에 구조적 응답을 갖는 루프다.
 
 ### Reflexion 루프 — 왜 단순 재시도와 다른가
 
@@ -324,19 +353,24 @@ npm run lint
 flowchart TD
     USER(["사용자"])
 
+    subgraph GN["예지 차 — Gulf of Envisioning"]
+        ALIGN["/gulf-loop:align\n갭 표면화 · gulf-align.md 저장"]
+    end
+
     subgraph GE["실행 차 — Gulf of Execution"]
         PROMPT["PROMPT.md\n목표 · 단계 · 불변 규칙"]
         FRAMEWORK["Phase 프레임워크\n0: Orient / 1–4: Execute / 999: Invariants"]
     end
 
     subgraph LOOP["Stop Hook 루프 (매 반복)"]
-        P0["Phase 0 — Orient\ngit log · progress.txt · JUDGE_FEEDBACK.md"]
+        P0["Phase 0 — Orient\ngit log · progress.txt · gulf-align.md · JUDGE_FEEDBACK.md"]
         P14["Phase 1–4 — Execute\n원자적 구현 + 커밋(why 포함)"]
         SIG["완료 신호 출력"]
         P0 --> P14 --> SIG
     end
 
     subgraph MEM["메모리 계층 (디스크 영속)"]
+        GA["gulf-align.md\nAlignment Memory\n합의된 명세·프로세스·평가 계약"]
         PT["progress.txt\nWorking Memory\n추론 추적 · 다음 작업"]
         JF["JUDGE_FEEDBACK.md\nExperiential Memory\nReflexion 이력"]
         GH["git history\nFactual Memory\n감사 추적 · 체크포인트"]
@@ -351,6 +385,8 @@ flowchart TD
 
     OUT(["완료\n브랜치 Merge"])
 
+    USER --> ALIGN
+    ALIGN -.->|"저장"| GA
     USER --> PROMPT & RUBRIC
     PROMPT --> FRAMEWORK --> P0
     RUBRIC --> G1 & G2
@@ -364,19 +400,20 @@ flowchart TD
 
     P14 -.->|"기록"| PT & GH
     G2 -.->|"거절 기록"| JF
-    PT & JF -.->|"Phase 0에서 읽기"| P0
+    GA & PT & JF -.->|"Phase 0에서 읽기"| P0
 ```
 
 ### 세 가지 모드는 하나의 시스템의 설정값
 
 세 모드는 서로 다른 시스템이 아니다. 동일한 stop hook 위에서 Gate 3의 동작과 브랜치 전략만 달라진다.
 
-| 모드 | Gate 3 동작 | 브랜치 전략 | 언제 쓰는가 |
-|------|------------|------------|------------|
-| **기본** | 없음 (Gate 1만) | 현재 브랜치 | 테스트가 충분해 autochecks로 커버 가능할 때 |
-| **Judge** | HITL 일시정지 | 현재 브랜치 | 코드 품질·설계 기준이 중요하고 사람이 개입 가능할 때 |
-| **자율** | 전략 리셋 | 전용 브랜치 + 자동 merge | 무인 장시간 실행이 필요할 때 |
-| **병렬** | 전략 리셋 × N | N개 worktree + 직렬 merge | 동일 목표를 병렬 전략으로 탐색할 때 |
+| 모드 | 예지 차 대응 | Gate 3 동작 | 브랜치 전략 | 언제 쓰는가 |
+|------|------------|------------|------------|------------|
+| **align** | gulf-align.md 저장 | — (루프 아님) | — | 루프 시작 전 갭 표면화 |
+| **기본** | gulf-align.md 읽기 | 없음 (Gate 1만) | 현재 브랜치 | 테스트가 충분해 autochecks로 커버 가능할 때 |
+| **Judge** | gulf-align.md 읽기 | HITL 일시정지 | 현재 브랜치 | 코드 품질·설계 기준이 중요하고 사람이 개입 가능할 때 |
+| **자율** | gulf-align.md 읽기 | 전략 리셋 | 전용 브랜치 + 자동 merge | 무인 장시간 실행이 필요할 때 |
+| **병렬** | gulf-align.md 읽기 | 전략 리셋 × N | N개 worktree + 직렬 merge | 동일 목표를 병렬 전략으로 탐색할 때 |
 
 ---
 
@@ -463,21 +500,40 @@ Sycophancy Loop를 끊는 메커니즘이다. 같은 방향의 변형을 반복�
 
 ## 9. 아직 없는 것 (실행 차 간극)
 
-실행 차 커버리지에는 구조적 간극이 있다. **루프 시작 전에 에이전트의 이해를 검증하는 단계가 없다.**
+### `/gulf-loop:align` — 구현됨
 
-사람이 PROMPT를 작성하고 루프를 시작한다. 에이전트가 PROMPT를 올바르게 해석했는지 확인 없이 반복이 진행된다. 20번을 돌고 나서야 "아, 내가 원한 게 이게 아니었는데"를 발견할 수 있다.
-
-### 예정: `/gulf-loop:align`
-
-루프 시작 전 정렬 단계. 에이전트가 PROMPT를 읽고 자신의 이해를 사람에게 제시해 확인받는다.
+루프 시작 전 정렬 단계. 에이전트가 `RUBRIC.md`와 기존 코드를 읽고, 4개 섹션으로 구성된 정렬 문서를 `.claude/gulf-align.md`에 저장한다.
 
 ```bash
-/gulf-loop:align "$(cat PROMPT.md)"
-# 에이전트:
-# "목표를 다음과 같이 이해했습니다: [재진술]
-#  실행 계획: [단계별 분해]
-#  가정하는 것들: [목록]
-#  확인되면 루프를 시작하겠습니다."
+/gulf-loop:align
+# 에이전트가 분석하고 저장:
+#
+# ## Specification Alignment
+# Goal: [한 문장으로 핵심 deliverable]
+# Deliverables: [완료 시 존재해야 할 구체적 결과물]
+# Out of scope: [하지 않을 것]
+#
+# ## Process Alignment
+# Approach: [기술 전략 한 문장]
+# Sequence: [순서가 있는 단계별 작업]
+#
+# ## Evaluation Alignment
+# Machine checks: [정확한 검증 명령어]
+# Edge cases: [다뤄야 할 경계 조건]
+#
+# ## Gulf of Envisioning — Gap Check
+# Capability gaps: [불확실한 능력 범위]
+# Instruction gaps: [명세의 모호한 부분]
+# Intentionality gaps: [예측하기 어려운 설계 선택]
+# Blocking questions: [사람의 확인이 필요한 것]
+```
+
+이후 모든 루프 반복은 Phase 0에서 `gulf-align.md`를 읽는다. 이 문서는 합의된 실행-평가 계약이다. 업데이트 없이 이 계약을 벗어나는 것은 수렴 실패다.
+
+권장 워크플로우:
+```bash
+/gulf-loop:align                                  # 갭 먼저 표면화
+/gulf-loop:start-with-judge "$(cat PROMPT.md)"    # 평가 포함 루프
 ```
 
 20번 반복 후 방향 수정보다, 0번째에서 방향을 확인하는 게 훨씬 싸다.
@@ -583,6 +639,7 @@ cd gulf-loop
 
 | 명령어 | 설명 |
 |--------|------|
+| `/gulf-loop:align` | **루프 시작 전 먼저 실행** — 예지·실행·평가 갭을 표면화, `gulf-align.md` 저장 |
 | `/gulf-loop:start PROMPT [--max-iterations N] [--completion-promise TEXT]` | 기본 루프 |
 | `/gulf-loop:start-with-judge PROMPT [--max-iterations N] [--hitl-threshold N]` | Judge 포함 루프 |
 | `/gulf-loop:start-autonomous PROMPT [--max-iterations N] [--base-branch BRANCH] [--with-judge]` | 자율 루프 (HITL 없음) |
@@ -629,7 +686,11 @@ cd gulf-loop
 ## 13. 참고문헌
 
 - Norman, D. A. (1988). *The Design of Everyday Things*. — 실행 차와 평가 차 개념의 원전
-- Shinn, N. et al. (2023). *Reflexion: Language Agents with Verbal Reinforcement Learning*. — Reflexion 패턴
+- Subramonyam, H. et al. (2024). Bridging the Gulf of Envisioning. *CHI 2024*. arXiv:2309.14459 — 세 번째 갭 (Gulf of Envisioning) 정의
+- Terry, M. et al. (2023). Interactive AI Alignment: Specification, Process, and Evaluation Alignment. arXiv:2311.00710 — 3차원 정렬 프레임워크
+- Lee, H. et al. (2025). The Impact of Generative AI on Critical Thinking. *CHI 2025*. — 신뢰-평가 역설 실증 (319명, 936개 사례)
+- Becker, J. et al. (METR, 2025). Measuring the Impact of Early-2025 AI on Experienced OSS Developer Productivity. arXiv:2507.09089 — 19% 느려지는데 20% 빨라졌다고 인식, 39%p 갭
+- Shinn, N. et al. (2023). *Reflexion: Language Agents with Verbal Reinforcement Learning*. arXiv:2303.11366 — Reflexion 패턴
 - Wang, L. et al. (2024). *Memory in the Age of AI Agents*. arXiv:2512.13564 — 3축 메모리 모델
 - Liu, N. et al. (2023). *Lost in the Middle: How Language Models Use Long Contexts*. — 컨텍스트 압력 실증
 - [ghuntley.com/ralph](https://ghuntley.com/ralph) — Geoffrey Huntley, Ralph Loop 기법 창시자
