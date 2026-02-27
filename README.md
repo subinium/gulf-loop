@@ -1,161 +1,529 @@
 # gulf-loop
 
 Claude Code plugin that brings **Human-in-the-Loop** design into the Ralph Loop pattern,
-structured around the HCI concept of execution and evaluation gulfs.
+structured around the HCI concept of execution, evaluation, and envisioning gulfs.
 
 ---
 
-## The concept
+## Table of Contents
 
-Donald Norman's *The Design of Everyday Things* defines two gaps that arise whenever a person interacts with a system:
-
-**Gulf of Execution** — the gap between *what the person intends* and *what actions the system makes available*.
-> "I want to build an auth module. But how do I express that to the agent in a way it actually executes correctly?"
-
-**Gulf of Evaluation** — the gap between *what the system produced* and *whether the person can tell if it's what they wanted*.
-> "The loop ran 20 iterations and says it's done. But is it actually right?"
-
-Recent HCI research (Subramonyam et al., CHI 2024) identified a **third gulf** that precedes both:
-
-**Gulf of Envisioning** — the gap *before execution even starts*: can the person even envision what the LLM is capable of, and how to specify it correctly?
-> "I don't know what the agent can do, how to describe what I want, or what the output will look like."
-
-Three sub-gaps:
-- **Capability gap** — unclear what the LLM can and cannot do given the tools and context
-- **Instruction gap** — difficulty translating intent into a prompt the agent actually executes correctly
-- **Intentionality gap** — output format and quality are hard to predict before starting
-
-The original Ralph Loop (and `anthropics/ralph-wiggum`) is a loop mechanism. It solves the *persistence* problem — how to make Claude keep working. But it doesn't explicitly address who evaluates the output and when.
-
-**gulf-loop** is a Ralph Loop implementation designed around closing all three gulfs, with a human explicitly placed in the evaluation path.
+1. [Why This Exists](#1-why-this-exists)
+2. [Three Gulfs](#2-three-gulfs)
+3. [Theoretical Background](#3-theoretical-background)
+4. [Core Design Principles](#4-core-design-principles)
+5. [Components and Why](#5-components-and-why)
+6. [System Architecture](#6-system-architecture)
+7. [Three Modes and Trade-offs](#7-three-modes-and-trade-offs)
+8. [Autonomous Mode Design](#8-autonomous-mode-design)
+9. [What's Not Yet Implemented](#9-whats-not-yet-implemented)
+10. [Install](#10-install)
+11. [Usage](#11-usage)
+12. [Comparison with Existing Ralph Implementations](#12-comparison-with-existing-ralph-implementations)
+13. [References](#13-references)
 
 ---
 
-## Design philosophy
+## 1. Why This Exists
+
+### What Ralph Loop solved
+
+The Ralph Loop (Ralph Wiggum technique) uses Claude Code's Stop hook to re-inject the same prompt every time Claude finishes a response. It solves one problem: **persistence** — how to make the agent keep working across multiple iterations on a task too large for a single session.
+
+That idea is powerful. An agent can make incremental progress on a large codebase through many small, validated steps.
+
+### What Ralph Loop didn't solve
+
+In practice, one fundamental problem surfaces:
+
+**The loop terminates on the agent's own judgment.**
+
+When the agent outputs `<promise>COMPLETE</promise>`, the loop ends. Nothing external verifies this.
+
+Problems that follow:
+
+- The agent can write stub code and call it done.
+- The agent can delete tests to make the suite pass and call it done.
+- The agent can iterate in the wrong direction for 20 steps and call it done.
+- The human has no visibility into what happened during the loop until seeing the final result.
+
+*You built a "keep going" loop, but what it keeps doing remains opaque.*
+
+gulf-loop addresses this directly.
+
+---
+
+## 2. Three Gulfs
+
+Donald Norman's *The Design of Everyday Things* (1988) defines two fundamental gaps that arise whenever a person interacts with a system. HCI research (Subramonyam et al., CHI 2024) identified a **third gulf** that precedes both in LLM tool interactions.
+
+### Gulf of Envisioning — newly defined
+
+*Before execution even starts*: can the person even envision what the LLM is capable of, and how to specify it correctly?
+
+> "I want to build an auth module. But I don't know if the agent can actually do it at the level I need. I don't know how to describe it so the agent understands correctly. I can't predict what the result will look like before starting."
+
+Three sub-gaps (Subramonyam et al., CHI 2024):
+- **Capability gap** — unclear what the LLM can and cannot do given available tools and context
+- **Instruction gap** — difficulty translating intent into a prompt the agent executes correctly
+- **Intentionality gap** — output form and quality are hard to predict before starting
+
+`/gulf-loop:align` addresses this gulf before the loop starts.
+
+### Gulf of Execution
+
+The gap between *what the person intends* and *what actions the system makes available*.
+
+> "I want to build an auth module. But how do I express that to the agent in a way it actually executes correctly? Which files to look at first, what unit of work per iteration, how much of the existing code to understand first — without all this context, the agent moves in a different direction from what I wanted."
+
+### Gulf of Evaluation
+
+The gap between *what the system produced* and *whether the person can tell if it's what they wanted*.
+
+> "The loop ran 20 iterations and says it's done. Tests pass. But is this actually what I wanted? Do the functions have single responsibility? Is there silent error swallowing? Is it architected in a way that's hard to maintain later?"
+
+**Why evaluation gaps are dangerous**: CHI 2025 research (Lee et al., 319 participants, 936 cases) found that as trust in AI output increases, users' critical review effort *decreases* — the trust-evaluation paradox. The more you trust the AI, the less you verify. A 2025 METR randomized controlled trial (N=16 experienced OSS developers, 246 tasks) found AI tools increased average task completion time by 19%, while developers *perceived* a 20% speedup — a 39-percentage-point perception gap. A loop without external evaluation has no structural protection against either effect.
+
+### In the agent loop context
+
+- **Gulf of Envisioning** = the gap before the loop: unclear whether the agent can do it, how to express it, what the output will look like. A misspecified PROMPT produces 20 iterations going in the wrong direction.
+- **Gulf of Execution** = intent not correctly translated into agent execution. The agent works without Phase structure, reimplements existing code without checking, or tries to do too much in one iteration and breaks things.
+- **Gulf of Evaluation** = agent says done but the human can't tell if it's actually correct. Tests passing ≠ code is good. "Complete" and "correct" are different things.
+
+---
+
+## 3. Theoretical Background
+
+### Agent loop pattern taxonomy
+
+Four fundamental patterns from agent loop research, and where gulf-loop sits:
+
+| Pattern | Structure | Representative systems | Relation to gulf-loop |
+|---------|-----------|----------------------|----------------------|
+| **ReAct** | Think → Act → Observe → Repeat | Claude Code, SWE-agent | Basis of Phase 0–4 structure |
+| **Plan-and-Execute** | Generate full plan → Execute step by step | Devin | Role of PROMPT.md |
+| **Reflexion** | Act → Evaluate → Language analysis of failure → Retry with analysis | SWE-agent w/ retry | The entire judge rejection cycle |
+| **Tree of Thoughts** | Generate k candidate paths → Evaluate → Explore | o3-style reasoning | Conceptual basis of parallel mode |
+
+gulf-loop is a **ReAct-based loop with Reflexion augmentation**. Phase 0–4 is ReAct's think-act-observe structure. The judge rejection → JUDGE_FEEDBACK.md → re-injection cycle is Reflexion.
+
+### Reflexion — why it's different from simple retry
+
+Shinn et al. (2023) showed that when LLMs analyze their own failures in natural language and carry that analysis into the next attempt, performance improves dramatically:
+
+- HumanEval: GPT-4 simple retry 67% → Reflexion 91%
+- AlfWorld: base ReAct 71% → Reflexion 97%
+
+The difference is not persistence — it's **structured failure analysis**. gulf-loop's judge rejection cycle:
 
 ```
-Gulf of Envisioning         Gulf of Execution              Gulf of Evaluation
-───────────────────         ─────────────────              ──────────────────
-Can I envision this?        User intent → PROMPT.md        System output → Is it right?
-     │                           │                                │
-     ▼                           ▼                                ▼
-/gulf-loop:align           Phase framework                RUBRIC.md criteria
-gulf-align.md              (how agent executes)           (what "done" means)
-     │                           │                                │
-     ▼                           ▼                                ▼
-Gaps surfaced              Agent iterates                 Judge evaluates
-before loop starts              │                                │
-                                └───────────── HITL ────────────┘
-                                          Human in the loop
-                                          (when evaluation diverges)
+1. Agent works                    (Act)
+2. Opus judge evaluates           (Evaluate)
+3. Rejection reason → JUDGE_FEEDBACK.md  (language analysis of failure)
+4. Re-inject with reason attached (retry with analysis)
 ```
 
-The **HITL gate** is not a safety net — it is the intended design. The loop is expected to surface the moments where human judgment is necessary and cannot be automated away.
+This is why JUDGE_FEEDBACK.md is not just a log. It is the Reflexion memory — directly injected into the next iteration's reasoning context.
+
+### 3-axis memory model
+
+*Memory in the Age of AI Agents* (arXiv:2512.13564) decomposes agent memory into three axes. Each gulf-loop component maps to a different memory function:
+
+**Axis 1: Form** — how is memory stored?
+
+All gulf-loop memory is token-level text files. Reason: the agent can read and write them directly, and the human can inspect them. No opaque vector DBs or parameter updates.
+
+**Axis 2: Function** — what is the memory for?
+
+| File | Memory function | Role |
+|------|----------------|------|
+| `gulf-align.md` | Alignment Memory | Agreed spec-process-evaluation contract before loop starts |
+| `progress.txt` | Working Memory | Current task state, next steps, decision reasoning |
+| `JUDGE_FEEDBACK.md` | Experiential Memory | Accumulated history of what approaches failed and why |
+| `git history` | Factual Memory | Audit trail of what changed, when, and why |
+
+**Axis 3: Dynamics** — how is memory formed, updated, retrieved?
+
+```
+Formation:  After Phase 1–4 → write progress.txt
+            On judge rejection → write JUDGE_FEEDBACK.md
+            On every commit → git history created
+
+Retrieval:  Phase 0 reads all files
+            Used directly as reasoning context for the next iteration
+```
+
+### Lost-in-the-Middle and the basis for max_iterations
+
+Empirically measured context pressure accumulation:
+
+```
+Iteration  5:  ~15k tokens  — stable
+Iteration 15:  ~45k tokens  — middle-section attention degradation begins
+Iteration 25:  ~70k tokens  — "Lost in the Middle" effect visible
+Iteration 40+: 75% threshold → auto-compaction triggered
+               most prior reasoning context lost
+```
+
+As context pressure increases:
+- Old decisions and their rationale are pushed outside the effective attention window.
+- Approaches rejected in previous iterations are "forgotten" and retried.
+- progress.txt is read but the quality of connected reasoning degrades.
+
+**The recommendation of max_iterations ≤ 50 is not just a safety limit.** There is empirical evidence that reasoning quality degrades as context accumulates. This is also why progress.txt should be kept concise — preserve the key reasoning path, not verbose logs.
+
+### Loop failure mode taxonomy
+
+Systematized failure patterns from agent loop research, and gulf-loop's responses:
+
+| Failure mode | Cause | Symptom | gulf-loop response |
+|-------------|-------|---------|-------------------|
+| **Sycophancy Loop** | No external evaluation, same approach repeated | Subtly varied but equivalent solutions | Judge + Reflexion, strategy reset |
+| **Context Pressure Collapse** | Reasoning context lost after 75% compaction | Retries previously rejected approach | max_iterations limit, concise progress.txt |
+| **Convergence Failure** | Undoes previous iteration's work | 2 steps forward, 1 step back | Phase 0 mandatory, progress.txt check |
+| **Metric Gaming** | Takes shortcuts to produce completion signal | Deletes tests, hardcodes, stubs | Phase 999 invariants |
+| **Premature Completion** | Claims done without verification | Outputs signal before criteria met | autochecks.sh, judge gate |
+| **Cold-start Bloat** | Excessive reading in Phase 0 | >20% context budget on Orient | Phase 0 budget ≤20% rule |
 
 ---
 
-## What is currently implemented
+## 4. Core Design Principles
 
-### Gulf of Evaluation (well-covered)
+### Principle 1: Separate the worker from the evaluator
 
-**RUBRIC.md** — makes evaluation criteria explicit and machine-readable.
+The fundamental problem with vanilla Ralph Loop is that **the agent that did the work also certifies its own completion**.
+
+In gulf-loop judge mode, these two roles are separated:
+
+- **Working agent**: writes code, outputs completion signal.
+- **Evaluating agent**: a separate Claude Opus instance independently evaluates against RUBRIC.md criteria.
+
+The working agent's completion claim is only a request for evaluation. The evaluator must approve before the loop actually ends. This is the principle of code review: the person who wrote the code should not be the final approver of their own code.
+
+### Principle 2: HITL is design, not safety net
+
+The HITL gate is not "the human intervenes when something goes wrong."
+
+In gulf-loop, HITL is an **intentional design** that detects moments when automated evaluation cannot converge, and transfers control to the human at those moments.
+
+N consecutive rejections means one of two things:
+1. The agent cannot find the right direction → needs redirection
+2. RUBRIC.md criteria don't fit the current situation → criteria need updating
+
+Both are **judgments that cannot be automated**. The HITL gate triggering is normal operation. The loop didn't fail — it found a problem it cannot solve and escalated to the human.
+
+### Principle 3: Define "done" before you start
+
+Implicit completion criteria are the cause of evaluation gaps. RUBRIC.md defines this in two layers:
+
+- **Auto-checks**: objective criteria the machine can judge (tests, type checks, lint)
+- **Judge criteria**: subjective criteria that require judgment (single responsibility, error handling style)
+
+Objective criteria must pass before subjective criteria are evaluated. Order matters. Give to the machine what the machine can judge first.
+
+### Principle 4: Evaluation history must persist
+
+The agent starts with a fresh context every iteration. If it doesn't remember why it was rejected in previous iterations, it repeats the same mistakes (Sycophancy Loop). JUDGE_FEEDBACK.md maintains all rejection reasons as a file. The agent reads this file in Phase 0 of every iteration.
+
+---
+
+## 5. Components and Why
+
+### Phase framework — narrowing the execution gulf
+
+The Phase framework is injected into the agent every iteration to structure how it executes. It tells the agent not just "what to build" but "how to approach it."
+
+#### Phase 0: Orient
+
+```
+git log --oneline -10
+[test command]
+cat progress.txt
+cat .claude/gulf-align.md 2>/dev/null      # alignment contract, if run
+cat JUDGE_FEEDBACK.md 2>/dev/null          # judge mode
+```
+
+Why this exists: the agent starts every iteration with a nearly empty context (Lost-in-the-Middle). Without Phase 0, it redoes already-completed work or repeats failed approaches. **Budget: ≤20% of context** — reading more leaves insufficient context for the actual work.
+
+#### Phase 1–4: Atomic execution
+
+Implement exactly one atomic unit per iteration. One feature, one bug fix, one test addition.
+
+Why this exists: doing too much in one iteration makes verification harder, and when something breaks, tracing where it broke becomes difficult. Atomic unit + commit creates natural checkpoints.
+
+```
+1. Search first — DO NOT ASSUME NOT IMPLEMENTED
+2. Implement completely — NO PLACEHOLDERS
+3. Run tests + lint + typecheck
+4. On all pass: commit (with "why" in message body)
+5. Update progress.txt (include reasoning)
+```
+
+#### Phase 999+: Invariants
+
+```
+999. NEVER modify, delete, or skip existing tests
+     A failing test means fix the implementation — not the test.
+999. NEVER hard-code values to satisfy specific test inputs
+999. NEVER output placeholder or stub implementations
+```
+
+Why these exist: agents can take shortcuts to produce a completion signal (Metric Gaming). Invariants explicitly prohibit these shortcuts.
+
+### RUBRIC.md — explicit definition of done
+
 ```markdown
-## Auto-checks           ← objective gate (exit codes)
+---
+model: claude-opus-4-6
+hitl_threshold: 5
+---
+
+## Auto-checks
 - npm test
 - npx tsc --noEmit
+- npm run lint
 
-## Judge criteria         ← subjective gate (LLM evaluation)
-- Functions have single responsibility.
-- No silent error handling.
+## Judge criteria
+- Every function has a single, clear responsibility.
+- Error handling is explicit — no silent failures or empty catch blocks.
 ```
 
-**Claude Opus as judge** — a separate model instance evaluates every iteration against the rubric. The working agent and the evaluator are decoupled.
+Auto-checks use exit codes. No ambiguity. Judge criteria are evaluated by the LLM. Give to the machine what the machine can judge; give to judgment what requires judgment.
 
-Why decoupling matters: CHI 2025 research (Lee et al.) found that as trust in AI output increases, users' critical review effort *decreases* — the trust-evaluation paradox. An external judge that never ran the code is structurally immune to this bias. Separately, a 2025 METR randomized controlled trial (N=16 experienced developers, 246 tasks) found AI tools increased task completion time by 19% on average, despite developers *perceiving* a 20% speedup — a 39-percentage-point perception gap. Without an external evaluation gate, the loop has no protection against this effect.
+### JUDGE_FEEDBACK.md — Reflexion memory
 
-**JUDGE_FEEDBACK.md** — every rejection is written to disk with timestamp and reason. The agent reads this on Phase 0 of every subsequent iteration. The evaluation history is visible and persistent.
-
-**HITL gate** — after N consecutive rejections, the loop pauses. This surfaces the moments where automated evaluation is failing, and inverts control to the human: update the rubric, refine the criteria, or redirect the agent.
+Written on every rejection:
 
 ```
-Iteration N: REJECTED — "validateEmail doesn't handle empty strings"
-Iteration N+1: REJECTED — "createUser has silent catch block"
-Iteration N+2: REJECTED — "still silent catch block"
-...
-Iteration N+4: → HITL PAUSE
-               Human reviews JUDGE_FEEDBACK.md
-               Human updates RUBRIC.md or redirects agent
-               /gulf-loop:resume
+---
+## Iteration 7 — REJECTED (3 consecutive) — 2026-02-27 14:32:01
+
+The catch block in createUser swallows the error silently.
+It logs to console.error but does not propagate the error to the caller.
+Errors must be explicitly handled or re-thrown.
 ```
 
-### Gulf of Execution (partially covered)
+The agent reads this file in Phase 0. This is not just a log — it is language analysis of failure in the Reflexion pattern, directly injected into the next iteration's reasoning context.
 
-**Phase framework** — injected into every iteration to structure how the agent executes:
+### progress.txt — working memory + reasoning trace
+
+Written by the agent at the end of every iteration. Not just a todo list — **must include decision reasoning** for the next iteration's agent to build on:
+
 ```
-Phase 0: Orient before acting (git log, tests, progress.txt)
-Phase 1–4: One atomic unit per iteration, validated, committed
-Phase 999+: Invariants that cannot be violated
+ORIGINAL_GOAL: [copy from gulf-align.md or RUBRIC — never change]
+ITERATION: 3
+
+COMPLETED:
+- user creation endpoint (chose argon2id over bcrypt — 72-byte limit, password shucking risk)
+
+REMAINING_GAP:
+- password hashing
+- rate limiting edge cases (not yet verified)
+
+CONFIDENCE: 75
+LAST_DECISION: argon2id — stronger memory-hardness than bcrypt, current OWASP recommendation
 ```
 
-**Language triggers** — baked into the framework prompt:
+Written this way, the next iteration's agent doesn't need to re-investigate "why argon2id." The structured format prevents goal drift across iterations (OnGoal, UIST 2025).
 
-| Trigger | Effect |
-|---------|--------|
-| `study` the file | Deeper analysis before acting |
-| `DO NOT ASSUME not implemented` | Prevents reimplementing existing code |
-| `capture the why` | Documents reasoning, not just code |
-| `Ultrathink` | Extended reasoning for complex design decisions |
+### .claude/autochecks.sh — automated verification for basic mode
 
-**Anti-cheating rules** — injected every iteration:
-```
-NEVER modify, delete, or skip existing tests
-NEVER hard-code values for specific test inputs
-NEVER output placeholders or stubs
+Even without a judge, completion claims can be verified in basic mode. Runs after completion signal detection. On failure: completion rejected + failure output re-injected.
+
+```bash
+# .claude/autochecks.sh
+#!/usr/bin/env bash
+npm test
+npx tsc --noEmit
+npm run lint
 ```
 
 ---
 
-## What is not yet implemented (execution gulf gap)
+## 6. System Architecture
 
-### `/gulf-loop:align` — now implemented
+### Full architecture
 
-A pre-loop command that addresses the Gulf of Envisioning before the loop starts. The agent reads `RUBRIC.md`, any existing source files, and outputs a 4-section alignment document saved to `.claude/gulf-align.md`:
+```mermaid
+flowchart TD
+    USER(["User"])
 
-```bash
-/gulf-loop:align
-# Agent outputs and saves gulf-align.md:
-#
-# ## Specification Alignment
-# Goal: [one-sentence deliverable]
-# Deliverables: [concrete artifact list]
-# Out of scope: [what will not be done]
-#
-# ## Process Alignment
-# Approach: [technical strategy]
-# Sequence: [ordered phases]
-#
-# ## Evaluation Alignment
-# Machine checks: [exact commands]
-# Edge cases: [boundary conditions]
-#
-# ## Gulf of Envisioning — Gap Check
-# Capability gaps: [uncertain abilities]
-# Instruction gaps: [ambiguous spec]
-# Intentionality gaps: [unpredictable design choices]
-# Blocking questions: [requires user clarification]
+    subgraph GN["Gulf of Envisioning"]
+        ALIGN["/gulf-loop:align\nSurface gaps · save gulf-align.md"]
+    end
+
+    subgraph GE["Gulf of Execution"]
+        PROMPT["PROMPT.md\nGoal · phases · invariants"]
+        FRAMEWORK["Phase framework\n0: Orient / 1–4: Execute / 999: Invariants"]
+    end
+
+    subgraph LOOP["Stop Hook Loop (each iteration)"]
+        P0["Phase 0 — Orient\ngit log · progress.txt · gulf-align.md · JUDGE_FEEDBACK.md"]
+        P14["Phase 1–4 — Execute\nAtomic implementation + commit (with why)"]
+        SIG["Output completion signal"]
+        P0 --> P14 --> SIG
+    end
+
+    subgraph MEM["Memory Layer (disk-persistent)"]
+        GA["gulf-align.md\nAlignment Memory\nAgreed spec-process-evaluation contract"]
+        PT["progress.txt\nWorking Memory\nReasoning trace · next steps"]
+        JF["JUDGE_FEEDBACK.md\nExperiential Memory\nReflexion history"]
+        GH["git history\nFactual Memory\nAudit trail · checkpoints"]
+    end
+
+    subgraph GV["Gulf of Evaluation"]
+        RUBRIC["RUBRIC.md\nAuto-checks · Judge criteria"]
+        G1{"Gate 1\nObjective\nAuto-checks"}
+        G2{"Gate 2\nSubjective\nOpus Judge"}
+        G3{"Gate 3\nHITL\nor strategy reset"}
+    end
+
+    OUT(["Done\nBranch merged"])
+
+    USER --> ALIGN
+    ALIGN -.->|"saves"| GA
+    USER --> PROMPT & RUBRIC
+    PROMPT --> FRAMEWORK --> P0
+    RUBRIC --> G1 & G2
+
+    SIG --> G1
+    G1 -->|"pass"| G2
+    G1 -->|"fail + details"| P0
+    G2 -->|"APPROVED"| OUT
+    G2 -->|"REJECTED"| G3
+    G3 -->|"feedback re-injected"| P0
+
+    P14 -.->|"writes"| PT & GH
+    G2 -.->|"rejection written"| JF
+    GA & PT & JF -.->|"read in Phase 0"| P0
 ```
 
-Every subsequent loop iteration reads `gulf-align.md` in Phase 0 as the agreed execution-evaluation contract. Deviating without updating it is a convergence failure.
+### Three modes as configuration of one system
 
-Recommended workflow:
-```bash
-/gulf-loop:align                          # surfaces gaps first
-/gulf-loop:start-with-judge "$(cat PROMPT.md)"   # loop with evaluation
+The three modes are not different systems. They are the same stop hook with different Gate 3 behavior and branch strategy.
+
+| Mode | Envisioning | Gate 3 | Branch strategy | When to use |
+|------|-------------|--------|----------------|-------------|
+| **align** | saves gulf-align.md | — (not a loop) | — | Surface gaps before the loop |
+| **basic** | reads gulf-align.md | none (Gate 1 only) | current branch | When tests are sufficient to cover completion |
+| **judge** | reads gulf-align.md | HITL pause | current branch | When code quality/design criteria matter and human can intervene |
+| **autonomous** | reads gulf-align.md | strategy reset | dedicated branch + auto-merge | When unattended long-running execution is needed |
+| **parallel** | reads gulf-align.md | strategy reset × N | N worktrees + serialized merge | When exploring the same goal with parallel strategies |
+
+---
+
+## 7. Three Modes and Trade-offs
+
+### Basic mode
+
+**Completion condition**: agent outputs completion signal + `.claude/autochecks.sh` passes (if present)
+
+**Trade-off**: no evaluator. The agent's completion claim is trusted. Subjective criteria — code quality, design decisions — are not verified.
+
+### Judge mode
+
+**Completion condition**: auto-checks pass **AND** Claude Opus judge APPROVED
+
+**Trade-off**: Opus API cost on every iteration. HITL gate creates moments requiring human intervention. Slower, but higher accuracy.
+
+### Autonomous mode
+
+**Completion condition**: same as basic or judge mode, but no HITL
+
+**Trade-off**: no HITL. If the agent runs in the wrong direction, no human intervenes. Strategy reset replaces HITL, but this judgment is also automated. **Autonomous mode is not "better" mode.** It is a trade-off: you give up human judgment in exchange for throughput.
+
+### Stop hook flow
+
+#### Basic mode
+```
+Stop event
+  ├── No state file → allow stop
+  ├── iteration >= max_iterations → stop
+  ├── <promise>COMPLETE</promise> in last message
+  │     .claude/autochecks.sh exists? → run it
+  │       Pass → stop (or _try_merge if autonomous)
+  │       Fail → re-inject with failure output
+  │     No autochecks.sh → stop (or _try_merge if autonomous)
+  └── Otherwise → increment iteration, re-inject prompt + framework
 ```
 
-### Planned: `milestone_every` — proactive HITL checkpoints
+#### Judge mode
+```
+Stop event
+  ├── [Gate 1] Run RUBRIC.md ## Auto-checks
+  │     Any fail → re-inject with failure details
+  │     All pass ↓
+  ├── [Gate 2] Claude Opus evaluates RUBRIC.md ## Judge criteria
+  │     APPROVED → stop (or _try_merge if autonomous)
+  │     REJECTED → write JUDGE_FEEDBACK.md, re-inject with reason
+  │     N consecutive rejections → HITL pause (or strategy reset if autonomous)
+```
 
-Currently, the HITL gate is **reactive** — it triggers only after evaluation fails N times.
+---
+
+## 8. Autonomous Mode Design
+
+### Why branch-based
+
+In autonomous mode, the agent works on a `gulf/auto-{timestamp}` branch. It never commits directly to main.
+
+**Main must always be in a verified state.** If main gets polluted while the agent works autonomously, it affects other workers and becomes hard to trace when problems occur. The mental model is not rollback-on-failure — it is **merge-as-success-condition**. The loop doesn't end until the branch merges cleanly.
+
+### Merge flow and conflict resolution
+
+```
+_try_merge
+  ├── Acquire flock (~/.claude/gulf-merge.lock)
+  │     Locked → retry merge next iteration
+  ├── git fetch + git rebase base_branch
+  │     Conflict → re-inject conflict resolution task
+  ├── Run .claude/autochecks.sh
+  │     Fail → re-inject with failure details
+  └── git merge --no-ff → done
+```
+
+A merge conflict is not an error. It is a signal that two independent changes touched the same file. On conflict, the agent re-enters the loop with:
+
+1. Understand the intent of both sides (`git log` and `git show`)
+2. Implement merged logic that preserves the intent of both sides
+3. Write tests that verify the merged behavior
+4. Confirm all existing tests still pass
+5. Output completion signal → merge is retried automatically
+
+**Tests are the proof of merge correctness.** Not "this side seems right" — but working code that proves it.
+
+### Commit message "why"
+
+In autonomous mode, the human cannot watch the work in real time. Git history is the only audit trail. "What was done" is visible in the diff. "Why this approach, why not the alternative" disappears without commit messages:
+
+```
+feat(auth): use argon2id for password hashing
+
+argon2id has stronger memory-hardness than bcrypt and is the current
+OWASP recommendation. bcrypt is limited to 72 bytes and is vulnerable to
+password shucking. argon2id resistance scales with the memory parameter.
+
+bcrypt was considered but ruled out due to the 72-byte limit —
+passwords longer than that are silently truncated.
+```
+
+When the loop ends after 5 hours, reading the commit history should let you reconstruct what judgments the agent made while working.
+
+### Strategy reset on consecutive rejections
+
+In judge mode when N consecutive rejections occur:
+
+- **HITL mode**: loop pauses → human intervenes
+- **Autonomous mode**: strategy reset → agent fundamentally changes its approach and retries + resets `consecutive_rejections`
+
+This is the mechanism for breaking out of the Sycophancy Loop. Instead of repeating variations of the same direction, it reads JUDGE_FEEDBACK.md to find the root cause of the rejection pattern and takes a different strategy.
+
+---
+
+## 9. What's Not Yet Implemented
+
+### `milestone_every` — proactive HITL checkpoints
+
+The current HITL gate is **reactive** — it triggers only after evaluation fails N times.
 
 A proactive checkpoint would pause the loop at regular intervals for human evaluation, independent of judge outcomes.
 
@@ -167,23 +535,36 @@ milestone_every: 5        # pause every 5 iterations for human review
 ---
 ```
 
-At iteration 5 and 10 and 15: loop pauses, shows progress summary, waits for `/gulf-loop:resume`.
+At iterations 5, 10, 15: loop pauses, shows progress summary, waits for `/gulf-loop:resume`.
 
-### Planned: `EXECUTION_LOG.md`
+### `EXECUTION_LOG.md` — epistemic handoff
 
-A convention where the agent writes its understanding of the remaining execution gap after each iteration:
-```markdown
+A convention where the agent writes its understanding of the remaining execution gap after each iteration — not just a todo list, but reasoning traces and uncertainties:
+
+```yaml
 ## Iteration 4
-Completed: user creation endpoint, input validation
-Remaining: password hashing (not yet started), tests for edge cases
-Gap I see: unclear whether to use bcrypt or argon2 — need spec
+completed:
+  - task: user creation endpoint
+    confidence: 0.9
+    reasoning: "reused existing validator.ts"
+
+decisions:
+  - chose: argon2id
+    rejected: bcrypt
+    reason: "72-byte limit"
+    revisit_if: "legacy system compatibility required"
+
+uncertainties:
+  - "rate limiting edge cases not yet verified"
+
+next: password hashing
 ```
 
-This makes the execution gap visible to the human across iterations, not just at HITL pause moments.
+The current progress.txt is a free-form log. This format would let the next iteration's agent structurally inherit the previous agent's decision rationale — not just conclusions, but the reasoning path.
 
 ---
 
-## Install
+## 10. Install
 
 ```bash
 git clone https://github.com/subinium/gulf-loop
@@ -201,7 +582,14 @@ Restart Claude Code after install.
 
 ---
 
-## Usage
+## 11. Usage
+
+### Recommended workflow (all modes)
+
+```bash
+/gulf-loop:align                                       # surface gaps first
+/gulf-loop:start-with-judge "$(cat PROMPT.md)"         # loop with evaluation
+```
 
 ### Basic mode
 
@@ -212,14 +600,6 @@ Completion = agent outputs `<promise>COMPLETE</promise>`.
 ```
 
 Optionally, add `.claude/autochecks.sh` to your project. If present and executable, it runs after the completion promise is detected — if it fails, completion is rejected and the agent is re-injected with the failure output.
-
-```bash
-# .claude/autochecks.sh
-#!/usr/bin/env bash
-npm test
-npx tsc --noEmit
-npm run lint
-```
 
 ### Judge mode (Gulf of Evaluation fully activated)
 
@@ -234,13 +614,6 @@ Create `RUBRIC.md` first (see `RUBRIC.example.md`), then:
 ```
 
 ### Autonomous mode (no human intervention)
-
-Completion = same as above, but the loop **never pauses for human input**.
-
-- Works on a dedicated feature branch (`gulf/auto-{timestamp}`)
-- On completion: rebases on base branch and auto-merges
-- On merge conflict: resolves autonomously — agent studies both sides, writes tests, recommits
-- On consecutive judge rejections: **strategy reset** instead of HITL pause
 
 ```bash
 # Basic autonomous
@@ -286,51 +659,7 @@ Then open each printed worktree path in a separate Claude Code session and run `
 | `/gulf-loop:cancel` | Stop the loop |
 | `/gulf-loop:resume` | Resume after HITL pause (or start pre-initialized worktree) |
 
----
-
-## Stop hook flow
-
-### Normal mode
-```
-Stop event
-  ├── No state file → allow stop
-  ├── iteration >= max_iterations → stop
-  ├── <promise>COMPLETE</promise> in last message
-  │     .claude/autochecks.sh exists? → run it
-  │       Pass → stop (or _try_merge if autonomous)
-  │       Fail → re-inject with failure output
-  │     No autochecks.sh → stop (or _try_merge if autonomous)
-  └── Otherwise → increment iteration, re-inject prompt + framework
-```
-
-### Judge mode
-```
-Stop event
-  ├── [Gate 1] Run RUBRIC.md ## Auto-checks
-  │     Any fail → re-inject with failure details
-  │     All pass ↓
-  ├── [Gate 2] Claude Opus evaluates RUBRIC.md ## Judge criteria
-  │     APPROVED → stop (or _try_merge if autonomous)
-  │     REJECTED → write JUDGE_FEEDBACK.md, re-inject with reason
-  │     N consecutive rejections → HITL pause  (or strategy reset if autonomous)
-```
-
-### Autonomous merge (_try_merge)
-```
-_try_merge
-  ├── Acquire flock (~/.claude/gulf-merge.lock)
-  │     Locked → re-inject "merge queued, retry next iteration"
-  ├── git fetch + git rebase base_branch
-  │     Conflict → re-inject conflict resolution task
-  │                 agent resolves, writes tests, recommits, re-signals
-  ├── Run .claude/autochecks.sh (if present)
-  │     Fail → re-inject with test failure details
-  └── git merge --no-ff branch → cleanup → release lock → stop
-```
-
----
-
-## PROMPT.md template
+### PROMPT.md template
 
 ```markdown
 ## Goal
@@ -349,13 +678,14 @@ Make state discoverable, not embedded.]
 - Run: git log --oneline -10
 - Run: npm test
 - Check: progress.txt
+- Check: .claude/gulf-align.md
 
 ## Phase 1–4 — Execute
 1. Pick next incomplete task
 2. Search first — DO NOT ASSUME NOT IMPLEMENTED
 3. Implement completely — NO PLACEHOLDERS
 4. Run: npm test && npm run lint && npx tsc --noEmit
-5. On all pass: git commit -m "feat: [task]"
+5. On all pass: git commit -m "feat: [task]" (with why in body)
 6. Append to progress.txt
 
 ## Phase 999 — Invariants
@@ -366,15 +696,16 @@ Make state discoverable, not embedded.]
 Output <promise>COMPLETE</promise> ONLY when ALL acceptance criteria above pass.
 ```
 
----
-
-## RUBRIC.md template
+### RUBRIC.md template
 
 ```markdown
 ---
 model: claude-opus-4-6
 hitl_threshold: 5
 ---
+
+## Envisioning
+<!-- Optional. Filled by /gulf-loop:align. -->
 
 ## Auto-checks
 - npm test
@@ -391,40 +722,50 @@ hitl_threshold: 5
 
 ---
 
-## Relation to existing Ralph Loop implementations
+## 12. Comparison with Existing Ralph Implementations
 
 ### vs `anthropics/ralph-wiggum`
 
-Same Stop hook architecture. gulf-loop adds:
+Same Stop hook architecture. ralph-wiggum's core is a 96-line stop hook — detects the completion signal and re-injects the same prompt.
 
 | | ralph-wiggum | gulf-loop |
 |---|---|---|
 | Design framing | Loop mechanism | HCI gulf-aware loop |
-| Gulf of Execution | Minimal | Phase framework + language triggers injected every iteration |
-| Gulf of Evaluation | Completion promise only | RUBRIC.md + Opus judge + JUDGE_FEEDBACK.md |
-| HITL | Not present | Core design — proactive pause on evaluation divergence |
+| Completion arbiter | Working agent itself | Separate Opus judge (judge mode) |
+| Loop pattern | ReAct | ReAct + Reflexion |
+| Gulf of Execution | None | Phase framework + language triggers every iteration |
+| Gulf of Evaluation | Completion promise only | RUBRIC.md + judge + JUDGE_FEEDBACK.md |
+| Gulf of Envisioning | None | `/gulf-loop:align` + gulf-align.md |
+| Memory structure | None | 4-layer (Alignment/Working/Experiential/Factual) |
+| HITL | None | Core design — hands control to human when evaluation diverges |
+| Autonomous mode | None | Branch-based, auto-merge, strategy reset |
 | Completion detection | JSONL transcript parsing | `last_assistant_message` field |
 
 ### vs `snarktank/ralph` (external bash loop)
 
-Different architecture. External loop = completely fresh context each iteration. Stop hook loop = same session.
+Fundamentally different architecture. External loop = completely fresh Claude session each iteration.
 
 | | snarktank/ralph | gulf-loop |
 |---|---|---|
+| Architecture | External bash → calls claude | Stop hook internal loop |
 | Context per iteration | Fully reset | Accumulates |
 | Best for | 100+ iterations | ≤50 iterations |
 | Gulf awareness | Not a design goal | Core design goal |
 
+Accumulating context allows leveraging prior iteration context — but carries the risk of context pressure collapse in long runs. The external loop approach avoids this. Choose based on your use case.
+
 ---
 
-## References
+## 13. References
 
 - Norman, D. A. (1988). *The Design of Everyday Things*. — Gulf of Execution and Evaluation
-- Subramonyam, H. et al. (2024). Bridging the Gulf of Envisioning. *CHI 2024*. arXiv:2309.14459 — Gulf of Envisioning
-- Terry, M. et al. (2023). Interactive AI Alignment: Specification, Process, and Evaluation Alignment. arXiv:2311.00710 — 3-axis alignment framework
-- Lee, H. et al. (2025). The Impact of Generative AI on Critical Thinking. *CHI 2025*. — Trust-evaluation paradox
-- Becker, J. et al. (METR, 2025). Measuring the Impact of Early-2025 AI on Experienced OSS Developer Productivity. arXiv:2507.09089 — 19% slower, 20% perceived speedup
+- Subramonyam, H. et al. (2024). Bridging the Gulf of Envisioning. *CHI 2024*. arXiv:2309.14459 — Gulf of Envisioning: three sub-gaps in LLM tool interactions
+- Terry, M. et al. (2023). Interactive AI Alignment: Specification, Process, and Evaluation Alignment. arXiv:2311.00710 — 3-axis alignment framework (specification / process / evaluation)
+- Lee, H. et al. (2025). The Impact of Generative AI on Critical Thinking. *CHI 2025*. — Trust-evaluation paradox: 319 participants, 936 cases
+- Becker, J. et al. (METR, 2025). Measuring the Impact of Early-2025 AI on Experienced OSS Developer Productivity. arXiv:2507.09089 — 19% slower, 20% perceived speedup, 39pp gap
 - Shinn, N. et al. (2023). Reflexion: Language Agents with Verbal Reinforcement Learning. arXiv:2303.11366 — Reflexion loop pattern
+- Wang, L. et al. (2024). Memory in the Age of AI Agents. arXiv:2512.13564 — 3-axis memory model (Form × Function × Dynamics)
+- Liu, N. et al. (2023). Lost in the Middle: How Language Models Use Long Contexts. — Context pressure empirical data
 - [ghuntley.com/ralph](https://ghuntley.com/ralph) — Geoffrey Huntley, originator of the Ralph Loop technique
-- [anthropics/claude-code plugins/ralph-wiggum](https://github.com/anthropics/claude-code/tree/main/plugins/ralph-wiggum) — Official Stop hook plugin
+- [anthropics/claude-code plugins/ralph-wiggum](https://github.com/anthropics/claude-code/tree/main/plugins/ralph-wiggum) — Official Stop hook plugin (96 lines)
 - [Claude Code Hooks](https://code.claude.com/docs/en/hooks) — Stop hook reference
