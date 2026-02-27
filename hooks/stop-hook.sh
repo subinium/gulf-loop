@@ -249,7 +249,7 @@ if [[ "$JUDGE_ENABLED" == "true" ]]; then
   fi
 
   # 8b. Auto-checks passed → call Judge
-  JUDGE_OUTPUT=$("${PLUGIN_ROOT}/scripts/run-judge.sh" 2>/dev/null) || JUDGE_OUTPUT="APPROVED"
+  JUDGE_OUTPUT=$(GULF_BASE_BRANCH="$BASE_BRANCH" "${PLUGIN_ROOT}/scripts/run-judge.sh" 2>/dev/null) || JUDGE_OUTPUT="APPROVED"
 
   if echo "$JUDGE_OUTPUT" | grep -q "^APPROVED"; then
     if [[ "$AUTONOMOUS" == "true" && -n "$BRANCH" ]]; then
