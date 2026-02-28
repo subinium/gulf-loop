@@ -127,11 +127,16 @@ cat progress.txt 2>/dev/null
 
 ## Completion
 
-Output `<promise>COMPLETE</promise>` **only** when all of these are true:
-- All tests pass (`exit 0`)
-- No type errors (`tsc --noEmit` clean)
-- No lint errors
-- No placeholder code remains
-- `progress.txt` reflects all completed work
+Output `<promise>COMPLETE</promise>` **only** when ALL of the following are machine-verified:
+
+- [ ] **Tests** — `npm test` (or stack equivalent) exits 0. Paste the output.
+- [ ] **Type check** — `tsc --noEmit` (or `mypy` / `cargo check`) exits 0. Paste the output.
+- [ ] **Lint** — `npm run lint` (or `ruff` / `clippy`) exits 0. Paste the output.
+- [ ] **Runtime** — If the project produces a runnable artifact, verify it starts without crashing. Paste the command and its output.
+- [ ] **No placeholders** — No TODO, stub, or unimplemented functions remain.
+- [ ] **`progress.txt`** — Reflects all completed work and any known limitations.
+
+**Paste the actual terminal output of each check inline before outputting the signal.**
+Do NOT claim a check passed without showing its output.
 
 The Stop hook verifies this. If the promise is output while criteria fail, the loop continues.

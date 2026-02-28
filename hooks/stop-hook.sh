@@ -293,6 +293,20 @@ if [[ "$MILESTONE_EVERY" -gt 0 && "$ITERATION" -gt 0 && $((ITERATION % MILESTONE
   exit 0
 fi
 
+# ── Research phase gate (iteration 1 only) ────────────────────────
+# Iteration 1 = research only. If progress.txt doesn't have APPROACH:,
+# the agent skipped the analysis. Re-inject without incrementing —
+# the agent retries iteration 1.
+if [[ "$ITERATION" -eq 1 ]]; then
+  if ! grep -q "^APPROACH:" "progress.txt" 2>/dev/null; then
+    RESEARCH_REMINDER="$(printf '%s\n\n---\n## Research Phase Not Complete\n\nThis is **iteration 1 — the research phase**. Your only task is analysis.\nDo NOT modify source files. Do NOT output the completion signal.\n\nWrite `progress.txt` with at minimum an `APPROACH:` field:\n\n```\nORIGINAL_GOAL: [restate the task]\nITERATION: 1 (research phase)\n\nSTRENGTHS:\n- [what to preserve]\n\nRISKS:\n- [top concerns]\n\nGAPS:\n- [unknowns]\n\nAPPROACH:\n[one paragraph: what, in what order, why this over alternatives]\n\nCONFIDENCE: [0-100]\n```\n\nOnce `progress.txt` contains `APPROACH:`, the loop advances to iteration 2.\n---\n\n%s' \
+      "$PROMPT" "$FRAMEWORK")"
+    _block "$RESEARCH_REMINDER" \
+      "Gulf Loop | Iter 1/$MAX_ITERATIONS | Research phase: write APPROACH to progress.txt"
+    exit 0
+  fi
+fi
+
 # ── 8. Branch: JUDGE MODE vs NORMAL MODE ─────────────────────────
 
 if [[ "$JUDGE_ENABLED" == "true" ]]; then

@@ -29,6 +29,11 @@ cat progress.txt 2>/dev/null               # learnings from previous iterations
 cat .claude/gulf-align.md 2>/dev/null      # pre-loop alignment doc (if run)
 ```
 
+> **Long file hint**: If `progress.txt` or `gulf-align.md` exceeds ~80 lines,
+> skip the middle — read the header and the last 60 lines:
+> `head -3 progress.txt && tail -60 progress.txt`
+> Reading verbose history wastes context budget (cold-start bloat).
+
 If `.claude/gulf-align.md` exists, read it first — it contains the agreed-upon
 spec, process, and evaluation contract. Deviating from it without updating it
 is a convergence failure.

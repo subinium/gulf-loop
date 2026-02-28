@@ -613,6 +613,59 @@ On loop completion, the stop hook appends `progress.txt` to `.claude/gulf-align.
 
 Running the loop twice on the same task is structurally better than running it once: the second run has richer ambient context from the first run's research phase and completed work.
 
+### gulf-align.md — 4-section format
+
+Created by `/gulf-loop:align` (or written manually) and read at the start of every iteration. It addresses all three gulfs simultaneously:
+
+| Section | Gulf | Contents |
+|---------|------|----------|
+| **Specification Alignment** | Envisioning | Goal, deliverables, out of scope |
+| **Process Alignment** | Execution | Technical approach, ordered phases, stack assumptions |
+| **Evaluation Alignment** | Evaluation | Machine checks (exact commands), behavioral checks, edge cases |
+| **Gulf of Envisioning — Gap Check** | Envisioning | Capability gaps, ambiguous spec parts, blocking questions |
+
+You can write it manually without `/gulf-loop:align`:
+
+```markdown
+## Specification Alignment
+- **Goal**: [one sentence — the core deliverable]
+- **Deliverables**: [list of artifacts]
+- **Out of scope**: [what you will NOT do]
+
+## Process Alignment
+- **Approach**: [technical strategy in one sentence]
+- **Sequence**: [ordered phases, each with a verifiable artifact]
+- **Stack assumptions**: [languages, frameworks, test tools]
+
+## Evaluation Alignment
+- **Machine checks**: [`npm test`, `tsc --noEmit`, `npm run lint`]
+- **Behavioral checks**: [what the running system must do]
+- **Edge cases**: [known boundaries the implementation must handle]
+
+## Gulf of Envisioning — Gap Check
+- **Capability gaps**: [things uncertain to implement]
+- **Instruction gaps**: [ambiguous or contradictory spec parts]
+- **Blocking questions**: [requires user clarification before starting]
+```
+
+If `Blocking questions` is non-empty, resolve them before running `/gulf-loop:start`.
+
+### When a task is too large — loop decomposition
+
+The [Lost-in-the-Middle](#lost-in-the-middle-and-the-basis-for-max_iterations) effect degrades reasoning past ~iteration 40. For large tasks, split into sequential loops:
+
+```
+Loop 1:  /gulf-loop:align + /gulf-loop:start   → architecture decisions, research brief
+Loop 2:  /gulf-loop:start                      → implement core feature A
+                                                  (reads Loop 1's gulf-align.md)
+Loop 3:  /gulf-loop:start                      → implement feature B + integration
+                                                  (reads Loop 1 + Loop 2 via gulf-align.md)
+```
+
+Each loop completion appends `progress.txt` to `gulf-align.md`, so later loops inherit the full decision history from earlier ones.
+
+**Split signal**: if your RUBRIC has > 8–10 acceptance criteria, or you anticipate > 40 iterations — break the task into sequential loops.
+
 ---
 
 ## 10. Install

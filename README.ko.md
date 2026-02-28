@@ -618,6 +618,59 @@ CONFIDENCE:  [0–100]
 
 같은 작업에 루프를 두 번 돌리면 한 번보다 구조적으로 더 좋은 결과를 얻는다: 두 번째 실행은 첫 번째 루프의 리서치 페이즈와 완료된 작업에서 얻은 풍부한 컨텍스트로 시작하기 때문이다.
 
+### gulf-align.md — 4섹션 포맷
+
+`/gulf-loop:align`이 생성하거나 수동으로 작성할 수 있으며, 매 반복 시작 시 읽힌다. 세 가지 차를 동시에 해소한다:
+
+| 섹션 | Gulf | 내용 |
+|------|------|------|
+| **Specification Alignment** | 예지 차 | 목표, 산출물, 범위 밖 |
+| **Process Alignment** | 실행 차 | 기술 접근법, 순서, 스택 가정 |
+| **Evaluation Alignment** | 평가 차 | 기계 검사 (정확한 명령어), 동작 검사, 엣지케이스 |
+| **Gulf of Envisioning — Gap Check** | 예지 차 | 능력 갭, 모호한 명세, 블로킹 질문 |
+
+`/gulf-loop:align` 없이 수동으로 작성하는 방법:
+
+```markdown
+## Specification Alignment
+- **Goal**: [한 문장 — 핵심 산출물]
+- **Deliverables**: [산출물 목록]
+- **Out of scope**: [하지 않을 것]
+
+## Process Alignment
+- **Approach**: [기술 전략 한 문장]
+- **Sequence**: [순서별 단계, 각 단계마다 검증 가능한 산출물]
+- **Stack assumptions**: [언어, 프레임워크, 테스트 도구]
+
+## Evaluation Alignment
+- **Machine checks**: [`npm test`, `tsc --noEmit`, `npm run lint`]
+- **Behavioral checks**: [실행 시스템이 해야 할 것]
+- **Edge cases**: [구현이 처리해야 할 경계 조건]
+
+## Gulf of Envisioning — Gap Check
+- **Capability gaps**: [구현 불확실한 것]
+- **Instruction gaps**: [모호하거나 모순된 명세]
+- **Blocking questions**: [루프 시작 전 사용자 확인 필요]
+```
+
+`Blocking questions`가 비어있지 않으면, 루프 시작 전에 먼저 해소한다.
+
+### 작업이 너무 클 때 — 루프 분해
+
+[Lost-in-the-Middle](#lost-in-the-middle과-max_iterations의-근거) 효과는 반복 ~40회 이후 추론 품질을 저하시킨다. 대규모 작업은 순차적 루프로 분리한다:
+
+```
+Loop 1:  /gulf-loop:align + /gulf-loop:start   → 아키텍처 결정, 리서치 브리프
+Loop 2:  /gulf-loop:start                      → 핵심 기능 A 구현
+                                                  (Loop 1의 gulf-align.md 읽음)
+Loop 3:  /gulf-loop:start                      → 기능 B 구현 + 통합
+                                                  (gulf-align.md로 Loop 1+2 인계)
+```
+
+각 루프 완료 시 `progress.txt`가 `gulf-align.md`에 추가되므로, 이후 루프는 이전 루프의 전체 결정 이력을 상속한다.
+
+**분리 신호**: RUBRIC의 수락 기준이 8–10개 이상이거나, 반복 40회 이상이 예상되면 작업을 순차적 루프로 나눈다.
+
 ---
 
 ## 10. 설치
