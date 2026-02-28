@@ -826,6 +826,7 @@ Runtime files (created in your project directory during loop execution):
 ```
 your-project/
 ├── RUBRIC.md                   # Completion criteria (judge mode, you create this)
+├── decisions.md                # Append-only decisions log (auto-written by stop hook)
 ├── JUDGE_FEEDBACK.md           # Reflexion memory (auto-written by stop hook)
 ├── JUDGE_EVOLUTION.md          # Judge growth log — accumulated judgment principles
 ├── progress.txt                # Working memory (agent writes each iteration)

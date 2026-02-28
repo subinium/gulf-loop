@@ -841,6 +841,7 @@ cd gulf-loop
 ```
 your-project/
 ├── RUBRIC.md                   # 완료 기준 (judge 모드, 직접 작성)
+├── decisions.md                # 이터레이션별 결정 누적 로그 (stop hook이 자동 기록)
 ├── JUDGE_FEEDBACK.md           # Reflexion 메모리 (stop hook이 자동 기록)
 ├── JUDGE_EVOLUTION.md          # Judge 성장 로그 — 누적된 판단 원칙
 ├── progress.txt                # 작업 기억 (에이전트가 매 반복 작성)

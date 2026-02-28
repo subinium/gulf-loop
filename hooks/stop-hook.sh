@@ -445,6 +445,20 @@ if [[ "$ITERATION" -eq 1 ]]; then
   fi
 fi
 
+# ── 7b. Append DECISIONS to decisions.md (append-only, per-iter) ─
+# progress.txt is overwritten every iteration — decisions would be lost.
+# This captures each iteration's DECISIONS before they disappear.
+# Deduped by iteration number: safe to re-run if stop-hook fires twice.
+if [[ -f "progress.txt" && "$ITERATION" -gt 1 ]]; then
+  if ! grep -q "^\[iter ${ITERATION}\]" "decisions.md" 2>/dev/null; then
+    awk -v iter="$ITERATION" '
+      /^DECISIONS:/ { f=1; next }
+      f && /^[A-Z_]+:/ { exit }
+      f && /^- / { sub(/^- /, ""); printf "[iter %s] %s\n", iter, $0 }
+    ' "progress.txt" 2>/dev/null >> "decisions.md" || true
+  fi
+fi
+
 # ── 8. Branch: JUDGE MODE vs NORMAL MODE ─────────────────────────
 
 if [[ "$JUDGE_ENABLED" == "true" ]]; then

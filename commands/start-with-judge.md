@@ -123,6 +123,7 @@ git log --oneline -10
 [test command]
 cat .claude/memory/INDEX.md 2>/dev/null    # structured memory: read index first, then follow links
 cat progress.txt 2>/dev/null
+cat decisions.md 2>/dev/null               # all decisions across iterations (append-only)
 cat JUDGE_FEEDBACK.md 2>/dev/null    # ← always read in judge mode
 ```
 

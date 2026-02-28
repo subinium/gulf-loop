@@ -636,6 +636,69 @@ _assert "distill: COMPLETED content excluded" \
 _assert "distill: UNCERTAINTIES excluded" \
   "0" "$(echo "$DISTILLED" | grep -c "^UNCERTAINTIES:" || true)"
 
+# ── Group 13: decisions.md append-only log ────────────────────────
+echo "── decisions.md: append-only per-iter log ───────────────────"
+
+DTMP=$(mktemp -d)
+trap 'rm -rf "$DTMP"' EXIT
+
+# Helper: mirrors stop-hook.sh decisions append logic
+_append_decisions() {
+  local pf="$1" iter="$2" out="$3"
+  if ! grep -q "^\[iter ${iter}\]" "$out" 2>/dev/null; then
+    awk -v iter="$iter" '
+      /^DECISIONS:/ { f=1; next }
+      f && /^[A-Z_]+:/ { exit }
+      f && /^- / { sub(/^- /, ""); printf "[iter %s] %s\n", iter, $0 }
+    ' "$pf" 2>/dev/null >> "$out" || true
+  fi
+}
+
+cat > "$DTMP/p3.txt" << 'EOF'
+ITERATION: 3
+DECISIONS:
+- chose: argon2id, rejected: bcrypt, reason: shucking risk
+- chose: Redis cache, rejected: in-memory, reason: restart persistence
+CONFIDENCE: 80
+EOF
+
+cat > "$DTMP/p5.txt" << 'EOF'
+ITERATION: 5
+DECISIONS:
+- chose: JWT, rejected: session, reason: stateless scaling
+CONFIDENCE: 85
+EOF
+
+# Append iter 3 decisions
+_append_decisions "$DTMP/p3.txt" 3 "$DTMP/decisions.md"
+_assert "decisions: iter 3 first entry"  "[iter 3] chose: argon2id, rejected: bcrypt, reason: shucking risk" \
+  "$(head -1 "$DTMP/decisions.md")"
+_assert "decisions: iter 3 second entry" "[iter 3] chose: Redis cache, rejected: in-memory, reason: restart persistence" \
+  "$(sed -n '2p' "$DTMP/decisions.md")"
+_assert "decisions: iter 3 — 2 entries total" "2" \
+  "$(wc -l < "$DTMP/decisions.md" | tr -d ' ')"
+
+# Append iter 5 decisions
+_append_decisions "$DTMP/p5.txt" 5 "$DTMP/decisions.md"
+_assert "decisions: iter 5 appended"    "[iter 5] chose: JWT, rejected: session, reason: stateless scaling" \
+  "$(tail -1 "$DTMP/decisions.md")"
+_assert "decisions: 3 entries total"    "3" \
+  "$(wc -l < "$DTMP/decisions.md" | tr -d ' ')"
+
+# Dedup: appending iter 3 again should not add entries
+_append_decisions "$DTMP/p3.txt" 3 "$DTMP/decisions.md"
+_assert "decisions: dedup — no duplicate on re-run" "3" \
+  "$(wc -l < "$DTMP/decisions.md" | tr -d ' ')"
+
+# No DECISIONS section — nothing appended
+cat > "$DTMP/p_nodec.txt" << 'EOF'
+ITERATION: 7
+CONFIDENCE: 90
+EOF
+_append_decisions "$DTMP/p_nodec.txt" 7 "$DTMP/decisions.md"
+_assert "decisions: no DECISIONS field — unchanged" "3" \
+  "$(wc -l < "$DTMP/decisions.md" | tr -d ' ')"
+
 echo ""
 echo "── Results ──────────────────────────────────────────────────"
 echo "  PASS: $PASS  FAIL: $FAIL"

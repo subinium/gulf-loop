@@ -26,6 +26,7 @@ Do NOT skip this. Use these commands to understand current state:
 git log --oneline -10                       # what changed recently
 [test command]                              # current pass/fail status
 cat progress.txt 2>/dev/null               # learnings from previous iterations
+cat decisions.md 2>/dev/null               # all decisions across iterations (append-only)
 cat .claude/gulf-align.md 2>/dev/null      # pre-loop alignment doc (if run)
 ```
 
