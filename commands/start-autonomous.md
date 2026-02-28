@@ -1,6 +1,6 @@
 ---
 description: "Start a fully autonomous Gulf Loop — no HITL, branch-based, auto-merges on completion"
-argument-hint: "PROMPT [--max-iterations N] [--base-branch BRANCH] [--with-judge] [--hitl-threshold N] [--milestone-every N]"
+argument-hint: "PROMPT [--max-iterations N] [--base-branch BRANCH] [--with-judge] [--hitl-threshold N] [--milestone-every N] [--structured-memory]"
 allowed-tools: ["Bash(${CLAUDE_PLUGIN_ROOT}/scripts/setup.sh:*)"]
 hide-from-slash-command-tool: "true"
 ---
