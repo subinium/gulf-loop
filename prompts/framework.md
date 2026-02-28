@@ -33,6 +33,9 @@ If `.claude/gulf-align.md` exists, read it first — it contains the agreed-upon
 spec, process, and evaluation contract. Deviating from it without updating it
 is a convergence failure.
 
+If `progress.txt` contains `ITERATION: 1 (research phase)`, this is the first
+implementation iteration — treat `APPROACH` as your starting plan.
+
 Then identify: what is the next incomplete task?
 
 #### Phase 1–4 — Execute (one atomic unit only)

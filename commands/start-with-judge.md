@@ -43,7 +43,68 @@ Review `JUDGE_FEEDBACK.md`, update `RUBRIC.md` if needed, then run `/gulf-loop:r
 
 ---
 
-## Iteration structure
+## Iteration 1 — Research Phase
+
+⚠️ **Do NOT modify source files. Do NOT commit. Do NOT output the completion signal.**
+
+Your job in iteration 1: produce a research brief in `progress.txt` that guides all subsequent iterations.
+
+### Step 1: Map the current state
+
+```
+cat .claude/gulf-align.md 2>/dev/null    # alignment spec (if exists)
+cat progress.txt 2>/dev/null             # previous loop learnings
+cat RUBRIC.md                            # judge criteria — understand what you'll be evaluated on
+cat JUDGE_FEEDBACK.md 2>/dev/null        # prior rejections (if re-running)
+git log --oneline -15
+```
+
+### Step 2: Four-perspective analysis
+
+**Defender** — what to preserve
+- What already satisfies the judge criteria?
+- What should NOT change?
+
+**Critic** — what is fundamentally weak
+- What would the judge reject about the current state?
+- What assumption in the request might be wrong?
+
+**Risk Scout** — where the approach breaks
+- What edge cases will fail the `## Checks` commands?
+- What criterion is hardest to satisfy and why?
+
+**Gap Detector** — what is unspecified
+- What does the request not specify that RUBRIC.md requires?
+- What design decisions haven't been made yet?
+
+> These perspectives may conflict. Navigate the tension — don't just list findings, prioritize them.
+
+### Step 3: Write `progress.txt`
+
+```
+ORIGINAL_GOAL: [restate the task — include implicit constraints from RUBRIC.md]
+ITERATION: 1 (research phase)
+
+STRENGTHS:
+- [Defender findings]
+
+RISKS:
+- [top concerns from Critic + Risk Scout, ranked]
+
+GAPS:
+- [unknowns that affect implementation]
+
+APPROACH:
+[One paragraph: what you will build, in what order, and why this satisfies the judge criteria]
+
+CONFIDENCE: [0–100]
+```
+
+After writing `progress.txt`, your iteration is complete. Do NOT output the completion signal.
+
+---
+
+## Iteration 2+ — Execution
 
 ### Phase 0 — Orient (≤20% of context)
 
@@ -54,8 +115,7 @@ cat progress.txt 2>/dev/null
 cat JUDGE_FEEDBACK.md 2>/dev/null    # ← always read in judge mode
 ```
 
-If `JUDGE_FEEDBACK.md` exists, study every rejection reason before acting.
-The judge's exact criticism tells you what to fix.
+If `JUDGE_FEEDBACK.md` exists, study every rejection reason before acting. The judge's exact criticism tells you what to fix.
 
 ### Phase 1–4 — Execute
 

@@ -27,7 +27,56 @@ You are running in **fully autonomous mode**. The loop never pauses for human in
 
 ---
 
-## Iteration structure
+## Iteration 1 — Research Phase
+
+⚠️ **Do NOT modify source files. Do NOT commit. Do NOT output the completion signal.**
+
+Your job in iteration 1: produce a research brief that guides all subsequent iterations.
+
+### Step 1: Map the current state
+
+```
+cat .claude/gulf-align.md 2>/dev/null
+cat progress.txt 2>/dev/null
+git log --oneline -15
+git status
+```
+
+### Step 2: Four-perspective analysis
+
+**Defender** — what to preserve
+**Critic** — what is fundamentally weak or wrong
+**Risk Scout** — where the obvious approach breaks (edge cases, failure modes)
+**Gap Detector** — what the request doesn't specify (decisions that need to be made)
+
+> These perspectives may conflict. The synthesis must navigate the tension.
+
+### Step 3: Write `progress.txt`
+
+```
+ORIGINAL_GOAL: [restate the task — include implicit constraints]
+ITERATION: 1 (research phase)
+
+STRENGTHS:
+- [Defender findings]
+
+RISKS:
+- [top concerns from Critic + Risk Scout, ranked]
+
+GAPS:
+- [unknowns from Gap Detector]
+
+APPROACH:
+[What you will build, in what order, and why this over alternatives]
+
+CONFIDENCE: [0–100]
+```
+
+After writing `progress.txt`, do NOT output the completion signal.
+
+---
+
+## Iteration 2+ — Execution
 
 ### Phase 0 — Orient (≤20% context budget)
 

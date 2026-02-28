@@ -150,6 +150,22 @@ _set_field() {
   fi
 }
 
+# ── Helper: successful loop completion ───────────────────────────
+# Appends progress.txt to gulf-align.md (inter-loop epistemic handoff),
+# then removes the state file. Call only on CLEAN completion, not on timeout.
+_on_complete() {
+  if [[ -f "progress.txt" ]]; then
+    mkdir -p ".claude"
+    {
+      printf '\n## Loop completed — %s | iteration %s\n\n' \
+        "$(date '+%Y-%m-%d %H:%M:%S')" "$ITERATION"
+      cat "progress.txt"
+    } >> ".claude/gulf-align.md"
+    echo "[gulf-loop] Loop summary appended to .claude/gulf-align.md." >&2
+  fi
+  rm -f "$STATE_FILE"
+}
+
 # ── Helper: emit block decision ───────────────────────────────────
 _block() {
   local reason="$1" sys_msg="$2"
@@ -260,7 +276,7 @@ _try_merge() {
 
   flock -u 9
   echo "[gulf-loop] Autonomous: merged $BRANCH → $BASE_BRANCH successfully." >&2
-  rm -f "$STATE_FILE"
+  _on_complete
   exit 0
 }
 
@@ -306,7 +322,7 @@ if [[ "$JUDGE_ENABLED" == "true" ]]; then
       _try_merge
     else
       echo "[gulf-loop] Judge APPROVED after $ITERATION iteration(s). Loop complete." >&2
-      rm -f "$STATE_FILE"
+      _on_complete
       exit 0
     fi
   fi
@@ -377,7 +393,7 @@ else
           _try_merge
         else
           echo "[gulf-loop] Autochecks passed. Loop complete after $ITERATION iteration(s)." >&2
-          rm -f "$STATE_FILE"
+          _on_complete
           exit 0
         fi
       else
@@ -393,7 +409,7 @@ else
         _try_merge
       else
         echo "[gulf-loop] Completion promise found. Loop complete after $ITERATION iteration(s)." >&2
-        rm -f "$STATE_FILE"
+        _on_complete
         exit 0
       fi
     fi
