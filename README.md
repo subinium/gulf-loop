@@ -15,7 +15,7 @@ structured around the HCI concept of execution, evaluation, and envisioning gulf
 6. [System Architecture](#6-system-architecture)
 7. [Three Modes and Trade-offs](#7-three-modes-and-trade-offs)
 8. [Autonomous Mode Design](#8-autonomous-mode-design)
-9. [What's Not Yet Implemented](#9-whats-not-yet-implemented)
+9. [Recent Additions](#9-recent-additions)
 10. [Install](#10-install)
 11. [Usage](#11-usage)
 12. [Comparison with Existing Ralph Implementations](#12-comparison-with-existing-ralph-implementations)
@@ -147,9 +147,11 @@ All gulf-loop memory is token-level text files. Reason: the agent can read and w
 Formation:  After Phase 1–4 → write progress.txt
             On judge rejection → write JUDGE_FEEDBACK.md
             On every commit → git history created
+            On loop completion → progress.txt appended to gulf-align.md
 
 Retrieval:  Phase 0 reads all files
             Used directly as reasoning context for the next iteration
+            Next loop run inherits completed loop's learnings via gulf-align.md
 ```
 
 ### Lost-in-the-Middle and the basis for max_iterations
@@ -572,6 +574,44 @@ CONFIDENCE: [0-100]
 ```
 
 This passes decision rationale to the next iteration — not just conclusions, but the reasoning path. Replaces the previously planned `EXECUTION_LOG.md`.
+
+### Research phase — iteration 1 as multi-perspective analysis
+
+Iteration 1 is now a dedicated research phase. The agent does **not** modify source files — it analyzes the task from four perspectives and writes findings to `progress.txt`.
+
+| Perspective | Focus |
+|-------------|-------|
+| **Defender** | What already works well? What should not change? |
+| **Critic** | What is fundamentally weak or wrong? What assumption in the request might be flawed? |
+| **Risk Scout** | Where does the obvious approach break? What edge cases are invisible? |
+| **Gap Detector** | What is unspecified in the request? What decisions haven't been made yet? |
+
+The four perspectives may conflict. The synthesis — written to `progress.txt` as `APPROACH` — navigates the tension rather than blindly implementing all findings. Implementation begins in iteration 2.
+
+```
+ITERATION: 1 (research phase)
+
+STRENGTHS:   [Defender — what to preserve]
+RISKS:       [Critic + Risk Scout — ranked concerns]
+GAPS:        [Gap Detector — unspecified decisions]
+APPROACH:    [one paragraph: what, in what order, and why over alternatives]
+CONFIDENCE:  [0–100]
+```
+
+This addresses cold-start context loss — the agent maps the problem space before touching any code.
+
+### Inter-loop handoff — `progress.txt → gulf-align.md`
+
+On loop completion, the stop hook appends `progress.txt` to `.claude/gulf-align.md`. The next loop run starts with accumulated learnings from all prior loops — not a blank context.
+
+```
+.claude/gulf-align.md
+├── pre-loop alignment (from /gulf-loop:align or written manually)
+└── ## Loop completed — 2026-02-28 14:22:11 | iteration 23
+    [progress.txt contents appended here]
+```
+
+Running the loop twice on the same task is structurally better than running it once: the second run has richer ambient context from the first run's research phase and completed work.
 
 ---
 

@@ -15,7 +15,7 @@ HCI의 실행 차(Gulf of Execution)와 평가 차(Gulf of Evaluation) 개념을
 6. [시스템 구조](#6-시스템-구조)
 7. [세 가지 모드와 트레이드오프](#7-세-가지-모드와-트레이드오프)
 8. [자율 모드의 설계](#8-자율-모드의-설계)
-9. [아직 없는 것](#9-아직-없는-것)
+9. [최근 추가 기능](#9-최근-추가-기능)
 10. [설치](#10-설치)
 11. [사용법](#11-사용법)
 12. [기존 구현과의 비교](#12-기존-구현과의-비교)
@@ -165,9 +165,11 @@ Formation  (생성):  /gulf-loop:align 실행 후 → gulf-align.md 기록
                     Phase 1–4 실행 후 → progress.txt 기록
                     Judge 거절 시 → JUDGE_FEEDBACK.md 기록
                     매 커밋 → git history 생성
+                    루프 완료 시 → progress.txt를 gulf-align.md에 추가
 
 Retrieval  (검색):  Phase 0에서 네 파일 모두 읽기
                     다음 반복의 추론 컨텍스트로 직접 사용
+                    다음 루프 실행 시 이전 루프 학습 내용을 gulf-align.md로 인계
 ```
 
 ### Lost-in-the-Middle과 max_iterations의 근거
@@ -577,6 +579,44 @@ CONFIDENCE: [0-100]
 ```
 
 결론만이 아니라 추론 경로를 다음 반복에 전달한다. 기존에 계획했던 `EXECUTION_LOG.md`를 대체한다.
+
+### 리서치 페이즈 — Iteration 1의 다관점 분석
+
+Iteration 1은 전용 리서치 페이즈다. 에이전트는 소스 파일을 수정하지 않고 네 가지 관점에서 작업을 분석해 `progress.txt`에 기록한다.
+
+| 관점 | 초점 |
+|------|------|
+| **Defender** | 이미 잘 작동하는 것은? 바꾸면 안 되는 것은? |
+| **Critic** | 근본적으로 약하거나 잘못된 것은? 요청의 전제가 틀린 것은? |
+| **Risk Scout** | 명백한 접근법이 어디서 깨지는가? 눈에 보이지 않는 엣지케이스는? |
+| **Gap Detector** | 요청에서 명시되지 않은 것은? 아직 결정되지 않은 사항은? |
+
+네 관점은 서로 충돌할 수 있다. `progress.txt`의 `APPROACH`로 기록되는 종합 결과는 모든 발견을 기계적으로 반영하는 게 아니라 이 긴장을 해소하는 방향으로 작성된다. 구현은 Iteration 2부터 시작된다.
+
+```
+ITERATION: 1 (research phase)
+
+STRENGTHS:   [Defender — 보존할 것]
+RISKS:       [Critic + Risk Scout — 순위가 매겨진 우려사항]
+GAPS:        [Gap Detector — 미명세 결정사항]
+APPROACH:    [한 단락: 무엇을, 어떤 순서로, 왜 이 방식인가]
+CONFIDENCE:  [0–100]
+```
+
+이는 Cold-start 컨텍스트 부족 문제를 해소한다 — 에이전트가 코드를 건드리기 전에 문제 공간을 먼저 파악한다.
+
+### 루프 간 핸드오프 — `progress.txt → gulf-align.md`
+
+루프 완료 시 stop hook이 `progress.txt`를 `.claude/gulf-align.md`에 추가한다. 다음 루프 실행은 이전 루프의 학습 내용을 빈 컨텍스트가 아닌 누적된 정보로 시작한다.
+
+```
+.claude/gulf-align.md
+├── 루프 시작 전 정렬 (/gulf-loop:align 또는 수동 작성)
+└── ## Loop completed — 2026-02-28 14:22:11 | iteration 23
+    [progress.txt 내용 추가됨]
+```
+
+같은 작업에 루프를 두 번 돌리면 한 번보다 구조적으로 더 좋은 결과를 얻는다: 두 번째 실행은 첫 번째 루프의 리서치 페이즈와 완료된 작업에서 얻은 풍부한 컨텍스트로 시작하기 때문이다.
 
 ---
 
