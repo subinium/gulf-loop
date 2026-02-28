@@ -789,7 +789,8 @@ Same Stop hook architecture. ralph-wiggum's core is a 96-line stop hook — dete
 | Gulf of Execution | None | Phase framework + language triggers every iteration |
 | Gulf of Evaluation | Completion promise only | RUBRIC.md + checks (dual-role gate + evidence) + judge + JUDGE_FEEDBACK.md |
 | Gulf of Envisioning | None | `/gulf-loop:align` + gulf-align.md |
-| Memory structure | None | 4-layer (Alignment/Working/Experiential/Factual) |
+| Memory structure | None | 4-layer (Alignment/Working/Experiential/Factual) + inter-loop handoff |
+| Cold-start analysis | None | Research phase: iteration 1 = 4-perspective analysis before any code change |
 | HITL | None | Core design — hands control to human when evaluation diverges |
 | Autonomous mode | None | Branch-based, auto-merge, strategy reset |
 | Completion detection | JSONL transcript parsing | `last_assistant_message` field |

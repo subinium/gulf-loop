@@ -717,7 +717,8 @@ cd gulf-loop
 | 루프 패턴 | ReAct | ReAct + Reflexion |
 | 실행 차 대응 | 없음 | Phase 프레임워크 + 언어 트리거 매 반복 주입 |
 | 평가 차 대응 | 완료 약속만 | RUBRIC.md + checks (이중 역할 게이트+증거) + judge + JUDGE_FEEDBACK.md |
-| 메모리 구조 | 없음 | 4계층 (Alignment/Working/Experiential/Factual) |
+| 메모리 구조 | 없음 | 4계층 (Alignment/Working/Experiential/Factual) + 루프 간 핸드오프 |
+| Cold-start 분석 | 없음 | 리서치 페이즈: iteration 1에서 코드 변경 전 4관점 분석 |
 | HITL | 없음 | 핵심 설계 — 평가 수렴 실패 시 인간에게 제어권 |
 | 자율 모드 | 없음 | 브랜치 기반, 자동 merge, 전략 리셋 |
 | 완료 감지 | JSONL 트랜스크립트 파싱 | `last_assistant_message` 필드 직접 사용 |
