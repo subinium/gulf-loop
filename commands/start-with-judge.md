@@ -79,6 +79,10 @@ git log --oneline -15
 
 > These perspectives may conflict. Navigate the tension — don't just list findings, prioritize them.
 
+### Step 2.5: Compare approaches before committing
+
+Generate 2–3 candidate approaches. For each, state: core idea, primary advantage, primary risk, and why accepted or rejected. Write the rejected alternatives in `APPROACHES_CONSIDERED:` — they are part of the reasoning record and help the judge understand what was considered.
+
 ### Step 3: Write `progress.txt` (and `spec.md` if structured memory is enabled)
 
 If `.claude/memory/spec.md` exists, fill it in now — Goal, completion criteria (aligned with `RUBRIC.md`), and out-of-scope. This is the only time spec.md should be written; treat it as immutable after iteration 1.
@@ -96,10 +100,14 @@ RISKS:
 GAPS:
 - [unknowns that affect implementation]
 
-APPROACH:
-[One paragraph: what you will build, in what order, and why this satisfies the judge criteria]
+APPROACHES_CONSIDERED:
+- [approach A]: [why rejected]
+- [approach B]: [why rejected]
 
-CONFIDENCE: [0–100]
+APPROACH:
+[One substantive paragraph: what you will build, in what order, and why this satisfies the judge criteria better than the alternatives. Min 50 chars.]
+
+CONFIDENCE: [30–100]
 ```
 
 After writing `progress.txt`, your iteration is complete. Do NOT output the completion signal.

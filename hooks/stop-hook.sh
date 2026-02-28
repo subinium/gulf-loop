@@ -346,15 +346,46 @@ if [[ "$MILESTONE_EVERY" -gt 0 && "$ITERATION" -gt 0 && $((ITERATION % MILESTONE
 fi
 
 # ── Research phase gate (iteration 1 only) ────────────────────────
-# Iteration 1 = research only. If progress.txt doesn't have APPROACH:,
-# the agent skipped the analysis. Re-inject without incrementing —
-# the agent retries iteration 1.
+# Quality checks (all must pass to advance):
+#   1. APPROACH: exists
+#   2. APPROACH: body has >= 50 chars (not a stub)
+#   3. CONFIDENCE: is a number between 30 and 100
+# Re-injects without incrementing if any check fails.
 if [[ "$ITERATION" -eq 1 ]]; then
+  RESEARCH_FAIL_REASON=""
+
+  # Check 1: APPROACH: key exists
   if ! grep -q "^APPROACH:" "progress.txt" 2>/dev/null; then
-    RESEARCH_REMINDER="$(printf '%s\n\n---\n## Research Phase Not Complete\n\nThis is **iteration 1 — the research phase**. Your only task is analysis.\nDo NOT modify source files. Do NOT output the completion signal.\n\nWrite `progress.txt` with at minimum an `APPROACH:` field:\n\n```\nORIGINAL_GOAL: [restate the task]\nITERATION: 1 (research phase)\n\nSTRENGTHS:\n- [what to preserve]\n\nRISKS:\n- [top concerns]\n\nGAPS:\n- [unknowns]\n\nAPPROACH:\n[one paragraph: what, in what order, why this over alternatives]\n\nCONFIDENCE: [0-100]\n```\n\nOnce `progress.txt` contains `APPROACH:`, the loop advances to iteration 2.\n---\n\n%s' \
-      "$PROMPT" "$FRAMEWORK")"
+    RESEARCH_FAIL_REASON="**Missing**: \`progress.txt\` must contain an \`APPROACH:\` field."
+  else
+    # Check 2: APPROACH body has substance (>= 50 chars after the key)
+    APPROACH_BODY=$(awk '
+      /^APPROACH:/ { found=1; body=substr($0,9); next }
+      found && /^[A-Z_]+:/ { exit }
+      found { body = body " " $0 }
+      END { gsub(/^[ \t]+|[ \t]+$/, "", body); print body }
+    ' "progress.txt" 2>/dev/null || echo "")
+    if [[ ${#APPROACH_BODY} -lt 50 ]]; then
+      RESEARCH_FAIL_REASON="**Insufficient**: \`APPROACH:\` body is too short (${#APPROACH_BODY} chars). Write at least one substantive paragraph explaining what, in what order, and why this over alternatives."
+    fi
+  fi
+
+  # Check 3: CONFIDENCE: is numeric and >= 30
+  if [[ -z "$RESEARCH_FAIL_REASON" ]]; then
+    CONFIDENCE_VAL=$(grep "^CONFIDENCE:" "progress.txt" 2>/dev/null \
+      | sed 's/^CONFIDENCE:[[:space:]]*//' | tr -d '[:space:]' | head -1)
+    if [[ -z "$CONFIDENCE_VAL" ]]; then
+      RESEARCH_FAIL_REASON="**Missing**: \`CONFIDENCE:\` field is required (integer 0–100)."
+    elif ! [[ "$CONFIDENCE_VAL" =~ ^[0-9]+$ ]] || [[ "$CONFIDENCE_VAL" -lt 30 ]]; then
+      RESEARCH_FAIL_REASON="**Too low**: \`CONFIDENCE: ${CONFIDENCE_VAL}\` — must be >= 30. If confidence is below 30, identify what is blocking understanding and resolve it before proceeding."
+    fi
+  fi
+
+  if [[ -n "$RESEARCH_FAIL_REASON" ]]; then
+    RESEARCH_REMINDER="$(printf '%s\n\n---\n## Research Phase Not Complete\n\nThis is **iteration 1 — the research phase**. Your only task is analysis.\nDo NOT modify source files. Do NOT output the completion signal.\n\n%s\n\nWrite `progress.txt` with:\n\n```\nORIGINAL_GOAL: [restate the task — include implicit constraints]\nITERATION: 1 (research phase)\n\nSTRENGTHS:\n- [what to preserve]\n\nRISKS:\n- [top concerns, ranked]\n\nGAPS:\n- [unknowns that affect the approach]\n\nAPPROACHES_CONSIDERED:\n- [approach A]: [why rejected]\n- [approach B]: [why rejected]\n\nAPPROACH:\n[one substantive paragraph: what, in what order, why this over the alternatives above]\n\nCONFIDENCE: [30–100]\n```\n\nOnce all checks pass, the loop advances to iteration 2 automatically.\n---\n\n%s' \
+      "$PROMPT" "$RESEARCH_FAIL_REASON" "$FRAMEWORK")"
     _block "$RESEARCH_REMINDER" \
-      "Gulf Loop | Iter 1/$MAX_ITERATIONS | Research phase: write APPROACH to progress.txt"
+      "Gulf Loop | Iter 1/$MAX_ITERATIONS | Research phase incomplete — see reason"
     exit 0
   fi
 fi
@@ -368,9 +399,12 @@ if [[ "$JUDGE_ENABLED" == "true" ]]; then
   # ────────────────────────────────────────────────────────────────
 
   # 8a. Run judge (handles checks + LLM evaluation in one call)
-  # Returns: APPROVED | CHECKS_FAILED: ... | REJECTED: ...
+  # Returns: APPROVED[\nMETA: ...] | CHECKS_FAILED: ... | REJECTED: ...\nMETA: ...
   JUDGE_OUTPUT=$(GULF_BASE_BRANCH="$BASE_BRANCH" "${PLUGIN_ROOT}/scripts/run-judge.sh" 2>/dev/null) \
     || JUDGE_OUTPUT="CHECKS_FAILED: run-judge.sh exited unexpectedly"
+
+  # Extract META: note for judge evolution log (line 2, if present)
+  JUDGE_META=$(echo "$JUDGE_OUTPUT" | grep "^META:" | head -1 | sed 's/^META:[[:space:]]*//')
 
   # Check failures — transient, do not count toward consecutive_rejections
   if echo "$JUDGE_OUTPUT" | grep -q "^CHECKS_FAILED"; then
@@ -384,6 +418,10 @@ if [[ "$JUDGE_ENABLED" == "true" ]]; then
   fi
 
   if echo "$JUDGE_OUTPUT" | grep -q "^APPROVED"; then
+    # Append meta-note to JUDGE_EVOLUTION.md so the judge learns from approvals
+    if [[ -n "$JUDGE_META" ]]; then
+      printf '[iter %s] APPROVED — %s\n' "$ITERATION" "$JUDGE_META" >> "JUDGE_EVOLUTION.md"
+    fi
     if [[ "$AUTONOMOUS" == "true" && -n "$BRANCH" ]]; then
       _try_merge
     else
@@ -394,8 +432,14 @@ if [[ "$JUDGE_ENABLED" == "true" ]]; then
   fi
 
   # 8c. Judge rejected
-  REJECTION_REASON=$(echo "$JUDGE_OUTPUT" | sed 's/^REJECTED:[[:space:]]*//' \
-    || echo "No specific reason provided.")
+  # Extract only the first line for the reason (META: is on line 2)
+  REJECTION_REASON=$(echo "$JUDGE_OUTPUT" | head -1 | sed 's/^REJECTED:[[:space:]]*//')
+  [[ -z "$REJECTION_REASON" ]] && REJECTION_REASON="No specific reason provided."
+
+  # Append meta-note so the judge learns from rejections too
+  if [[ -n "$JUDGE_META" ]]; then
+    printf '[iter %s] REJECTED — %s\n' "$ITERATION" "$JUDGE_META" >> "JUDGE_EVOLUTION.md"
+  fi
 
   NEXT_CONSEC=$((CONSECUTIVE_REJ + 1))
 
@@ -451,6 +495,14 @@ else
   PROMISE_TAG="<promise>${COMPLETION_PROMISE}</promise>"
 
   if echo "$LAST_MSG" | grep -qF "$PROMISE_TAG"; then
+    # Soft-check: warn if structured memory was never maintained
+    local MEM_DIR=".claude/memory"
+    if [[ "$STRUCTURED_MEMORY" == "true" && -f "$MEM_DIR/loops/current.md" ]]; then
+      if grep -q "(agent: append as tasks finish)" "$MEM_DIR/loops/current.md" 2>/dev/null; then
+        echo "[gulf-loop] WARNING: .claude/memory/loops/current.md was never updated (still contains template text)." >&2
+        echo "  Consider updating it before the loop completes — it will be archived as-is." >&2
+      fi
+    fi
     AUTOCHECK_SCRIPT=".claude/autochecks.sh"
     if [[ -f "$AUTOCHECK_SCRIPT" && -x "$AUTOCHECK_SCRIPT" ]]; then
       echo "[gulf-loop] Promise found. Running autochecks before accepting..." >&2

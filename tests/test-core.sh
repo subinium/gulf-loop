@@ -348,6 +348,138 @@ _assert "archival: sequential numbering (loop-002.md)" "yes" \
 _assert "archival: INDEX.md has 2 loop links" "2" \
   "$(grep -c '^\- \[Loop' "$ARCTMP/.claude/memory/INDEX.md")"
 
+# ── Group 9: research gate quality checks ─────────────────────────
+echo "── research gate: quality checks ───────────────────────────"
+
+RGTMP=$(mktemp -d)
+
+# Helper: inline research gate logic (mirrors stop-hook.sh)
+_research_gate() {
+  local pf="$1"
+  [[ -f "$pf" ]] || { echo "missing"; return; }
+  grep -q "^APPROACH:" "$pf" || { echo "no_approach"; return; }
+  local approach_body
+  approach_body=$(awk '
+    /^APPROACH:/ { found=1; body=substr($0,9); next }
+    found && /^[A-Z_]+:/ { exit }
+    found { body = body " " $0 }
+    END { gsub(/^[ \t]+|[ \t]+$/, "", body); print body }
+  ' "$pf" 2>/dev/null || echo "")
+  if [[ ${#approach_body} -lt 50 ]]; then
+    echo "approach_too_short"; return
+  fi
+  local confidence
+  confidence=$(grep "^CONFIDENCE:" "$pf" 2>/dev/null \
+    | sed 's/^CONFIDENCE:[[:space:]]*//' | tr -d '[:space:]' | head -1)
+  if [[ -z "$confidence" ]]; then
+    echo "no_confidence"; return
+  fi
+  if ! [[ "$confidence" =~ ^[0-9]+$ ]] || [[ "$confidence" -lt 30 ]]; then
+    echo "confidence_low"; return
+  fi
+  echo "pass"
+}
+
+# No progress.txt
+_assert "research gate: missing file"        "missing"          "$(_research_gate "$RGTMP/absent.txt")"
+
+# Missing APPROACH:
+cat > "$RGTMP/p1.txt" << 'EOF'
+ORIGINAL_GOAL: test
+ITERATION: 1 (research phase)
+CONFIDENCE: 80
+EOF
+_assert "research gate: missing APPROACH"    "no_approach"      "$(_research_gate "$RGTMP/p1.txt")"
+
+# APPROACH too short (stub)
+cat > "$RGTMP/p2.txt" << 'EOF'
+ORIGINAL_GOAL: test
+ITERATION: 1 (research phase)
+APPROACH: short
+CONFIDENCE: 80
+EOF
+_assert "research gate: APPROACH too short"  "approach_too_short" "$(_research_gate "$RGTMP/p2.txt")"
+
+# CONFIDENCE missing
+cat > "$RGTMP/p3.txt" << 'EOF'
+ORIGINAL_GOAL: test
+ITERATION: 1 (research phase)
+APPROACH: This is a sufficiently long approach paragraph that explains what will be built and in what order.
+EOF
+_assert "research gate: missing CONFIDENCE"  "no_confidence"    "$(_research_gate "$RGTMP/p3.txt")"
+
+# CONFIDENCE too low
+cat > "$RGTMP/p4.txt" << 'EOF'
+ORIGINAL_GOAL: test
+ITERATION: 1 (research phase)
+APPROACH: This is a sufficiently long approach paragraph that explains what will be built and in what order.
+CONFIDENCE: 20
+EOF
+_assert "research gate: CONFIDENCE too low"  "confidence_low"   "$(_research_gate "$RGTMP/p4.txt")"
+
+# Valid — all checks pass
+cat > "$RGTMP/p5.txt" << 'EOF'
+ORIGINAL_GOAL: test
+ITERATION: 1 (research phase)
+APPROACH: This is a sufficiently long approach paragraph that explains what will be built and in what order. It also explains why this approach was chosen over the alternatives.
+CONFIDENCE: 75
+EOF
+_assert "research gate: valid progress.txt"  "pass"             "$(_research_gate "$RGTMP/p5.txt")"
+
+# CONFIDENCE exactly 30 (boundary)
+cat > "$RGTMP/p6.txt" << 'EOF'
+ORIGINAL_GOAL: test
+ITERATION: 1 (research phase)
+APPROACH: This is a sufficiently long approach paragraph that explains what will be built and in what order.
+CONFIDENCE: 30
+EOF
+_assert "research gate: CONFIDENCE=30 passes" "pass"            "$(_research_gate "$RGTMP/p6.txt")"
+
+# ── Group 10: JUDGE_EVOLUTION.md meta-note format ─────────────────
+echo "── JUDGE_EVOLUTION.md: meta-note appending ──────────────────"
+
+EVTMP=$(mktemp -d)
+
+# Simulate approved with meta
+(
+  cd "$EVTMP"
+  JUDGE_META="prefer explicit error types over generic string messages"
+  ITERATION=5
+  if [[ -n "$JUDGE_META" ]]; then
+    printf '[iter %s] APPROVED — %s\n' "$ITERATION" "$JUDGE_META" >> "JUDGE_EVOLUTION.md"
+  fi
+)
+_assert "evolution: APPROVED meta appended"  "1" \
+  "$(grep -c '^\[iter 5\] APPROVED' "$EVTMP/JUDGE_EVOLUTION.md")"
+
+# Simulate rejected with meta
+(
+  cd "$EVTMP"
+  JUDGE_META="state mutation outside reducer always causes test flakiness"
+  ITERATION=6
+  if [[ -n "$JUDGE_META" ]]; then
+    printf '[iter %s] REJECTED — %s\n' "$ITERATION" "$JUDGE_META" >> "JUDGE_EVOLUTION.md"
+  fi
+)
+_assert "evolution: REJECTED meta appended"  "1" \
+  "$(grep -c '^\[iter 6\] REJECTED' "$EVTMP/JUDGE_EVOLUTION.md")"
+
+# Both entries accumulated
+_assert "evolution: 2 entries total"          "2" \
+  "$(wc -l < "$EVTMP/JUDGE_EVOLUTION.md" | tr -d ' ')"
+
+# Empty META — no line appended
+(
+  cd "$EVTMP"
+  JUDGE_META=""
+  ITERATION=7
+  if [[ -n "$JUDGE_META" ]]; then
+    printf '[iter %s] APPROVED — %s\n' "$ITERATION" "$JUDGE_META" >> "JUDGE_EVOLUTION.md"
+  fi
+)
+_assert "evolution: empty META not appended"  "2" \
+  "$(wc -l < "$EVTMP/JUDGE_EVOLUTION.md" | tr -d ' ')"
+
 echo ""
 echo "── Results ──────────────────────────────────────────────────"
 echo "  PASS: $PASS  FAIL: $FAIL"

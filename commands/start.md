@@ -68,6 +68,16 @@ Think through each perspective independently. Give each real effort — don't sk
 
 > These perspectives may conflict. The synthesis should navigate the tension — preserve what the Defender values, address what the Critic flags, account for what the Scout identifies.
 
+### Step 2.5: Compare approaches before committing
+
+Before writing the final APPROACH, generate 2–3 candidate approaches. For each:
+- State the core idea in one sentence
+- Identify its primary advantage
+- Identify its primary risk or cost
+- State why you're rejecting it (or choosing it)
+
+This step prevents premature convergence on the obvious solution. The alternatives you reject become the `APPROACHES_CONSIDERED:` field in `progress.txt` — they are part of the reasoning record.
+
 ### Step 3: Write `progress.txt` (and `spec.md` if structured memory is enabled)
 
 If `.claude/memory/spec.md` exists, fill it in now — Goal, completion criteria, and out-of-scope. This is the only time spec.md should be written; treat it as immutable after iteration 1.
@@ -85,10 +95,14 @@ RISKS:
 GAPS:
 - [unknowns from Gap Detector that affect implementation]
 
-APPROACH:
-[One paragraph: what you will build, in what order, and why this approach over the obvious alternatives]
+APPROACHES_CONSIDERED:
+- [approach A]: [why rejected — core tradeoff]
+- [approach B]: [why rejected — core tradeoff]
 
-CONFIDENCE: [0–100]
+APPROACH:
+[One substantive paragraph: what you will build, in what order, and why this beats the alternatives above. Min 50 chars.]
+
+CONFIDENCE: [30–100 — if below 30, resolve the blocking gap before proceeding]
 ```
 
 After writing `progress.txt`, your iteration is complete. **Do not output** `<promise>COMPLETE</promise>` — the loop re-injects automatically and implementation begins in iteration 2.

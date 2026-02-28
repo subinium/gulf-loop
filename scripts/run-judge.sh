@@ -154,6 +154,34 @@ if [[ -n "$CHANGED_FILES" ]]; then
   done <<< "$CHANGED_FILES"
 fi
 
+# ── 6b. Build supplementary context sections ─────────────────────
+
+# Spec context: gulf-align.md describes the agreed goals and evaluation contract.
+# Giving the judge the original spec prevents scope drift in long loops.
+SPEC_SECTION=""
+if [[ -f ".claude/gulf-align.md" ]]; then
+  SPEC_CONTENT=$(head -80 ".claude/gulf-align.md" 2>/dev/null || true)
+  [[ -n "$SPEC_CONTENT" ]] && \
+    SPEC_SECTION="## Project Specification (gulf-align.md)\n\n${SPEC_CONTENT}\n\n"
+fi
+
+# Evolution context: accumulated meta-notes from past judge decisions.
+# Gives the judge its own judgment history — enables principled growth over loops.
+EVOLUTION_SECTION=""
+if [[ -f "JUDGE_EVOLUTION.md" ]]; then
+  EVOLUTION_CONTENT=$(tail -40 "JUDGE_EVOLUTION.md" 2>/dev/null || true)
+  [[ -n "$EVOLUTION_CONTENT" ]] && \
+    EVOLUTION_SECTION="## Judge's Own Past Patterns (JUDGE_EVOLUTION.md)\n\nThese are meta-notes you wrote at the end of prior decisions in this project.\nUse them to stay consistent with your previous reasoning — or consciously explain why you're updating your stance.\n\n${EVOLUTION_CONTENT}\n\n"
+fi
+
+# Prior rejection context: recent rejections tell the judge what was already tried.
+FEEDBACK_SECTION=""
+if [[ -f "JUDGE_FEEDBACK.md" ]]; then
+  FEEDBACK_CONTENT=$(tail -60 "JUDGE_FEEDBACK.md" 2>/dev/null || true)
+  [[ -n "$FEEDBACK_CONTENT" ]] && \
+    FEEDBACK_SECTION="## Prior Rejections (recent JUDGE_FEEDBACK.md)\n\nWhat has already been tried and rejected. Avoid re-approving approaches that previously failed.\n\n\`\`\`\n${FEEDBACK_CONTENT}\n\`\`\`\n\n"
+fi
+
 # ── 7. If any checks failed, return CHECKS_FAILED (not REJECTED) ──
 # CHECKS_FAILED does not increment consecutive_rejections in stop-hook.sh.
 # It is treated as a transient failure (fix the code), not a strategy failure.
@@ -183,7 +211,7 @@ JUDGE_PROMPT="You are a senior code reviewer running an automated quality gate.
 
 Evaluation scope: ${SCOPE_DESC}
 
-${COMMIT_SECTION}## Behavioral Contract Results
+$(printf '%b' "${SPEC_SECTION}")$(printf '%b' "${EVOLUTION_SECTION}")$(printf '%b' "${FEEDBACK_SECTION}")${COMMIT_SECTION}## Behavioral Contract Results
 
 ${CONTRACT_RESULTS:-No behavioral contracts defined.}
 
@@ -199,19 +227,22 @@ Evaluate the implementation based on the evidence above.
   The output (not just the exit code) tells you what the behavior is.
 - Source files show **how** the code is implemented.
 - Judge criteria are additional natural-language requirements to evaluate.
+- If gulf-align.md was provided, the implementation must satisfy the original specification.
+- If past evolution notes exist, stay consistent with your prior reasoning unless you explicitly update your stance.
 
 Decision rules:
 1. If ANY behavioral contract FAILED: output REJECTED — contracts are hard failures.
 2. If all contracts PASSED but a criterion is unmet: output REJECTED with the specific criterion.
 3. If all contracts PASSED and ALL criteria are fully met: output APPROVED.
 
-Output exactly one of:
-- \`APPROVED\` — if and only if all contracts pass AND all criteria are fully met.
-- \`REJECTED: [reason]\` — concise explanation of which contracts failed and/or which criteria are unmet.
+Output format — exactly two lines:
+Line 1: \`APPROVED\` or \`REJECTED: [concise reason — which criterion/contract failed]\`
+Line 2: \`META: [one sentence — the key insight or pattern that determined this decision]\`
 
-Do not output anything other than APPROVED or REJECTED: [reason].
-Be strict. An almost-passing criterion is a failing criterion.
-A failing contract is a hard failure regardless of criterion quality."
+The META line is your own judgment log. It will be saved and shown to you in future decisions.
+Write it as a principle, not a description: \"prefer X over Y\", \"watch for Z pattern\", \"N always fails when...\".
+
+Be strict. An almost-passing criterion is a failing criterion."
 
 # ── 9. Call Claude judge ──────────────────────────────────────────
 RESULT=$(printf '%s' "$JUDGE_PROMPT" \

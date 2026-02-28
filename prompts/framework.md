@@ -131,8 +131,13 @@ UNCERTAINTIES:
 REMAINING_GAP:
 - [next task — what still needs to happen]
 
-CONFIDENCE: [0–100 — honest estimate that all remaining work will pass evaluation]
+CONFIDENCE: [30–100 — honest estimate that all remaining work will pass evaluation]
 ```
+
+> **Iteration 1 (research phase) also requires:**
+> - `APPROACHES_CONSIDERED:` — 2–3 alternatives you evaluated and rejected, with reason
+> - `APPROACH:` body must be ≥ 50 chars (substantive, not a stub)
+> - `CONFIDENCE:` must be ≥ 30 (if below, resolve blocking gaps first)
 
 Using this format passes decision rationale to the next iteration — not just conclusions, but the reasoning path (epistemic handoff). Prevents goal drift (OnGoal, UIST 2025).
 
