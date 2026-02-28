@@ -72,7 +72,7 @@ if [[ -n "$CONTRACTS" ]]; then
 
     CONTRACT_OUTPUT=""
     CONTRACT_EXIT=0
-    if CONTRACT_OUTPUT=$(eval "$CMD" 2>&1); then
+    if CONTRACT_OUTPUT=$(bash -c "$CMD" 2>&1); then
       CONTRACT_EXIT=0
     else
       CONTRACT_EXIT=$?
@@ -136,7 +136,7 @@ CHANGED_FILES=$(git diff --name-only "${MERGE_BASE}..HEAD" -- . "${EXCLUDES[@]}"
 COMMIT_LOG=$(git log --oneline "${MERGE_BASE}..HEAD" 2>/dev/null | head -20 || echo "")
 
 SOURCE_SECTION=""
-SOURCE_BUDGET=8000
+SOURCE_BUDGET=24000
 SOURCE_USED=0
 
 if [[ -n "$CHANGED_FILES" ]]; then

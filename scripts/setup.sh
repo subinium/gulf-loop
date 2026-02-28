@@ -119,7 +119,7 @@ case "$MODE" in
     echo "[gulf-loop] Loop initialized."
     echo "  Iterations : 1 / $MAX_ITERATIONS max"
     echo "  Completion : <promise>${COMPLETION_PROMISE}</promise>"
-    [[ "$MILESTONE_EVERY" -gt 0 ]] && echo "  Milestone  : every $MILESTONE_EVERY iterations"
+    if [[ "$MILESTONE_EVERY" -gt 0 ]]; then echo "  Milestone  : every $MILESTONE_EVERY iterations"; fi
     ;;
 
   judge)
@@ -127,9 +127,9 @@ case "$MODE" in
     _state "$STATE_FILE" "" false true
     echo "[gulf-loop] Judge mode initialized."
     echo "  Iterations     : 1 / $MAX_ITERATIONS max"
-    echo "  Judge model    : ${JUDGE_MODEL:-claude-opus-4-6}"
+    echo "  Judge model    : ${JUDGE_MODEL:-claude-sonnet-4-6}"
     echo "  HITL threshold : $HITL_THRESHOLD consecutive rejections"
-    [[ "$MILESTONE_EVERY" -gt 0 ]] && echo "  Milestone      : every $MILESTONE_EVERY iterations"
+    if [[ "$MILESTONE_EVERY" -gt 0 ]]; then echo "  Milestone      : every $MILESTONE_EVERY iterations"; fi
     ;;
 
   autonomous)
@@ -143,8 +143,8 @@ case "$MODE" in
     echo "[gulf-loop] Autonomous mode initialized."
     echo "  Branch     : $BRANCH → $BASE_BRANCH"
     echo "  Iterations : 1 / $MAX_ITERATIONS max"
-    [[ "$WITH_JUDGE" == "true" ]] && echo "  Judge      : enabled (strategy reset at $HITL_THRESHOLD)"
-    [[ "$MILESTONE_EVERY" -gt 0 ]] && echo "  Milestone  : every $MILESTONE_EVERY iterations"
+    if [[ "$WITH_JUDGE" == "true" ]]; then echo "  Judge      : enabled (strategy reset at $HITL_THRESHOLD)"; fi
+    if [[ "$MILESTONE_EVERY" -gt 0 ]]; then echo "  Milestone  : every $MILESTONE_EVERY iterations"; fi
     ;;
 
   parallel)

@@ -4,7 +4,7 @@
 # Fires on every Claude Code "Stop" event.
 #
 # Normal mode:      re-injects prompt until <promise>COMPLETE</promise> found
-# Judge mode:       re-injects prompt until auto-checks pass AND Opus judge approves
+# Judge mode:       re-injects prompt until auto-checks pass AND LLM judge approves
 # Autonomous mode:  any mode above, but no HITL pause — merges to base branch on completion
 #
 # State file: .claude/gulf-loop.local.md
@@ -49,7 +49,7 @@ _field() {
     | grep "^${1}:" \
     | sed "s/^${1}:[[:space:]]*//" \
     | tr -d '"'"'" \
-    | xargs \
+    | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' \
     || echo "${2}"
 }
 
@@ -173,7 +173,10 @@ _try_merge() {
     MAIN_REPO=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
   else
     IN_WORKTREE=true
-    MAIN_REPO=$(echo "$GIT_COMMON" | sed 's|/.git$||')
+    # git worktree list always lists main worktree first — robust to non-standard git dir names
+    MAIN_REPO=$(git worktree list --porcelain 2>/dev/null \
+      | awk '/^worktree / { print substr($0, 10); exit }')
+    [[ -z "$MAIN_REPO" ]] && MAIN_REPO=$(echo "$GIT_COMMON" | sed 's|/\.git.*||')
   fi
 
   # Try to acquire merge lock (non-blocking)
@@ -284,7 +287,8 @@ if [[ "$JUDGE_ENABLED" == "true" ]]; then
 
   # 8a. Run judge (handles checks + LLM evaluation in one call)
   # Returns: APPROVED | CHECKS_FAILED: ... | REJECTED: ...
-  JUDGE_OUTPUT=$(GULF_BASE_BRANCH="$BASE_BRANCH" "${PLUGIN_ROOT}/scripts/run-judge.sh" 2>/dev/null) || JUDGE_OUTPUT="APPROVED"
+  JUDGE_OUTPUT=$(GULF_BASE_BRANCH="$BASE_BRANCH" "${PLUGIN_ROOT}/scripts/run-judge.sh" 2>/dev/null) \
+    || JUDGE_OUTPUT="CHECKS_FAILED: run-judge.sh exited unexpectedly"
 
   # Check failures — transient, do not count toward consecutive_rejections
   if echo "$JUDGE_OUTPUT" | grep -q "^CHECKS_FAILED"; then

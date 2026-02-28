@@ -35,7 +35,7 @@ PAUSE_REASON=$(awk '
 awk '
   /^active:/ { print "active: true"; next }
   /^consecutive_rejections:/ { print "consecutive_rejections: 0"; next }
-  /^pause_reason:/ { print "pause_reason: -"; next }
+  /^pause_reason:/ { print "pause_reason: none"; next }
   { print }
 ' "$STATE_FILE" > "${STATE_FILE}.tmp" && mv "${STATE_FILE}.tmp" "$STATE_FILE"
 

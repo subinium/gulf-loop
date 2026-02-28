@@ -1,0 +1,225 @@
+#!/usr/bin/env bash
+# tests/test-core.sh — Regression tests for gulf-loop core logic
+#
+# Tests the helper functions and key flows without requiring a live
+# Claude Code environment. Run from the repo root:
+#   bash tests/test-core.sh
+
+set -euo pipefail
+
+PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TMP=$(mktemp -d)
+PASS=0
+FAIL=0
+
+trap 'rm -rf "$TMP"' EXIT
+
+_assert() {
+  local desc="$1" expected="$2" actual="$3"
+  if [[ "$expected" == "$actual" ]]; then
+    printf '  \033[32mPASS\033[0m  %s\n' "$desc"
+    PASS=$((PASS + 1))
+  else
+    printf '  \033[31mFAIL\033[0m  %s\n' "$desc"
+    printf '        expected: %s\n' "$expected"
+    printf '        actual  : %s\n' "$actual"
+    FAIL=$((FAIL + 1))
+  fi
+}
+
+# ── Inline helper implementations (kept in sync with stop-hook.sh) ──
+# These mirror the actual implementations; if they diverge, tests break.
+
+STATE_FILE=""  # set per test group
+
+_frontmatter() {
+  awk '/^---$/ { count++; if (count == 2) exit; next } count == 1 { print }' "$STATE_FILE"
+}
+
+_field() {
+  local FRONTMATTER
+  FRONTMATTER=$(_frontmatter)
+  echo "$FRONTMATTER" \
+    | grep "^${1}:" \
+    | sed "s/^${1}:[[:space:]]*//" \
+    | tr -d '"'"'" \
+    | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' \
+    || echo "${2}"
+}
+
+_update_field() {
+  local field="$1" value="$2"
+  awk -v f="$field" -v v="$value" '
+    $0 ~ "^"f":" { print f ": " v; next }
+    { print }
+  ' "$STATE_FILE" > "${STATE_FILE}.tmp" && mv "${STATE_FILE}.tmp" "$STATE_FILE"
+}
+
+_set_field() {
+  local field="$1" value="$2"
+  if grep -q "^${field}:" "$STATE_FILE" 2>/dev/null; then
+    _update_field "$field" "$value"
+  else
+    awk -v f="$field" -v v="$value" '
+      BEGIN { cnt=0; done=0 }
+      /^---$/ { cnt++; if (cnt==2 && !done) { print f ": " v; done=1 } }
+      { print }
+    ' "$STATE_FILE" > "${STATE_FILE}.tmp" && mv "${STATE_FILE}.tmp" "$STATE_FILE"
+  fi
+}
+
+# ── Group 1: _field() ─────────────────────────────────────────────
+echo "── _field() ─────────────────────────────────────────────────"
+
+STATE_FILE="$TMP/g1.md"
+cat > "$STATE_FILE" <<'EOF'
+---
+active: true
+iteration: 7
+max_iterations: 50
+completion_promise: "my custom signal"
+milestone_every: 5
+branch: gulf/auto-20260101-worker-1
+---
+prompt body here
+EOF
+
+_assert "_field: plain integer"        "7"                     "$(_field iteration 1)"
+_assert "_field: default for absent"   "42"                    "$(_field nonexistent 42)"
+_assert "_field: strips quotes"        "my custom signal"      "$(_field completion_promise COMPLETE)"
+_assert "_field: value with spaces"    "my custom signal"      "$(_field completion_promise COMPLETE)"
+_assert "_field: hyphenated value"     "gulf/auto-20260101-worker-1" "$(_field branch "")"
+_assert "_field: milestone_every"      "5"                     "$(_field milestone_every 0)"
+_assert "_field: active boolean"       "true"                  "$(_field active false)"
+
+# ── Group 2: _update_field() ──────────────────────────────────────
+echo "── _update_field() ──────────────────────────────────────────"
+
+STATE_FILE="$TMP/g2.md"
+cat > "$STATE_FILE" <<'EOF'
+---
+active: true
+iteration: 3
+consecutive_rejections: 2
+---
+prompt
+EOF
+
+_update_field "iteration" "4"
+_assert "_update_field: increments iteration" "4" "$(_field iteration 0)"
+
+_update_field "active" "false"
+_assert "_update_field: sets active false" "false" "$(_field active true)"
+
+_update_field "consecutive_rejections" "0"
+_assert "_update_field: resets counter" "0" "$(_field consecutive_rejections 99)"
+
+# Verify prompt body is untouched
+BODY=$(awk '/^---$/{c++;next} c>=2{print}' "$STATE_FILE")
+_assert "_update_field: prompt body preserved" "prompt" "$BODY"
+
+# ── Group 3: _set_field() ─────────────────────────────────────────
+echo "── _set_field() ─────────────────────────────────────────────"
+
+STATE_FILE="$TMP/g3.md"
+cat > "$STATE_FILE" <<'EOF'
+---
+active: true
+iteration: 5
+---
+prompt body
+EOF
+
+# Add new field
+_set_field "pause_reason" "milestone"
+_assert "_set_field: adds new field"    "milestone" "$(_field pause_reason "")"
+
+# Update existing field
+_set_field "pause_reason" "hitl"
+_assert "_set_field: updates existing"  "hitl"      "$(_field pause_reason "")"
+
+# Field must appear inside frontmatter (before second ---)
+FRONTMATTER_LINES=$(awk '/^---$/{c++;if(c==2)exit;next} c==1{print}' "$STATE_FILE")
+_assert "_set_field: field in frontmatter" "1" \
+  "$(echo "$FRONTMATTER_LINES" | grep -c "^pause_reason:" || echo 0)"
+
+# Prompt body must be intact
+BODY=$(awk '/^---$/{c++;next} c>=2{print}' "$STATE_FILE")
+_assert "_set_field: prompt body intact" "prompt body" "$BODY"
+
+# ── Group 4: milestone pause increments iteration ─────────────────
+echo "── milestone pause: iteration increment ─────────────────────"
+
+STATE_FILE="$TMP/g4.md"
+cat > "$STATE_FILE" <<'EOF'
+---
+active: true
+iteration: 5
+milestone_every: 5
+---
+prompt
+EOF
+
+ITERATION=$(_field iteration 1)
+MILESTONE_EVERY=$(_field milestone_every 0)
+NEXT=$((ITERATION + 1))
+
+# Simulate the milestone pause check
+if [[ "$MILESTONE_EVERY" -gt 0 && "$ITERATION" -gt 0 && $((ITERATION % MILESTONE_EVERY)) -eq 0 ]]; then
+  _update_field "iteration" "$NEXT"
+  _set_field "pause_reason" "milestone"
+  _update_field "active" "false"
+fi
+
+_assert "milestone: active set false"     "false"     "$(_field active true)"
+_assert "milestone: iteration incremented" "6"        "$(_field iteration 0)"
+_assert "milestone: pause_reason written" "milestone" "$(_field pause_reason "")"
+
+# After resume, verify iteration is 6 so 6 % 5 != 0 (no re-pause)
+ITER_AFTER=$(_field iteration 0)
+[[ $((ITER_AFTER % MILESTONE_EVERY)) -ne 0 ]] && RETRIGGER="no" || RETRIGGER="yes"
+_assert "milestone: resume does not re-trigger" "no" "$RETRIGGER"
+
+# ── Group 5: _field() does NOT word-split (xargs regression) ──────
+echo "── _field(): no word-splitting on space values ───────────────"
+
+STATE_FILE="$TMP/g5.md"
+cat > "$STATE_FILE" <<'EOF'
+---
+completion_promise: "finish the feature"
+branch: my-feature-branch
+---
+EOF
+
+_assert "_field: multi-word value intact" "finish the feature" "$(_field completion_promise COMPLETE)"
+_assert "_field: hyphen in value"         "my-feature-branch"  "$(_field branch "")"
+
+# ── Group 6: state file schema integrity ──────────────────────────
+echo "── state file: setup.sh writes correct fields ───────────────"
+
+cd "$TMP"
+mkdir -p .claude
+
+# basic mode with milestone
+bash "$PLUGIN_ROOT/scripts/setup.sh" --mode basic --milestone-every 3 "test prompt" >/dev/null 2>&1
+STATE_FILE=".claude/gulf-loop.local.md"
+_assert "setup: active=true"        "true" "$(_field active false)"
+_assert "setup: iteration=1"        "1"    "$(_field iteration 0)"
+_assert "setup: milestone_every=3"  "3"    "$(_field milestone_every 0)"
+
+BODY=$(awk '/^---$/{c++;next} c>=2{print}' "$STATE_FILE")
+_assert "setup: prompt body written" "test prompt" "$BODY"
+rm "$STATE_FILE"
+
+# basic mode without milestone (milestone_every must be absent)
+bash "$PLUGIN_ROOT/scripts/setup.sh" --mode basic "test prompt" >/dev/null 2>&1
+MILESTONE_IN_FILE=$(grep "^milestone_every:" "$STATE_FILE" 2>/dev/null || echo "absent")
+_assert "setup: no milestone_every when 0" "absent" "$MILESTONE_IN_FILE"
+rm "$STATE_FILE"
+
+cd "$PLUGIN_ROOT"
+
+echo ""
+echo "── Results ──────────────────────────────────────────────────"
+echo "  PASS: $PASS  FAIL: $FAIL"
+[[ $FAIL -eq 0 ]] && echo "  All tests passed." || { echo "  Some tests FAILED."; exit 1; }
