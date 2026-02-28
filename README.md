@@ -311,6 +311,18 @@ Errors must be explicitly handled or re-thrown.
 
 The agent reads this file in Phase 0. This is not just a log — it is language analysis of failure in the Reflexion pattern, directly injected into the next iteration's reasoning context.
 
+### JUDGE_EVOLUTION.md — judge growth log
+
+Written on every judge decision (approval or rejection). Each entry is a principle extracted from that decision:
+
+```
+[iter 3] REJECTED — prefer explicit error propagation over silent catch blocks
+[iter 5] APPROVED — consistent error structure across all async handlers
+[iter 8] REJECTED — watch for hardcoded test values in boundary conditions
+```
+
+The stop hook feeds the last 40 lines of this file back to the judge on every call. The judge sees its own accumulated reasoning patterns — preventing repeated judgment errors across iterations.
+
 ### progress.txt — working memory + reasoning trace
 
 Written by the agent at the end of every iteration. Not just a todo list — **must include decision reasoning** for the next iteration's agent to build on:
@@ -617,12 +629,26 @@ The four perspectives may conflict. The synthesis — written to `progress.txt` 
 ```
 ITERATION: 1 (research phase)
 
-STRENGTHS:   [Defender — what to preserve]
-RISKS:       [Critic + Risk Scout — ranked concerns]
-GAPS:        [Gap Detector — unspecified decisions]
-APPROACH:    [one paragraph: what, in what order, and why over alternatives]
-CONFIDENCE:  [0–100]
+STRENGTHS:
+- [Defender — what to preserve]
+
+RISKS:
+- [Critic + Risk Scout — ranked concerns]
+
+GAPS:
+- [Gap Detector — unspecified decisions]
+
+APPROACHES_CONSIDERED:
+- [approach A]: [why rejected]
+- [approach B]: [why rejected]
+
+APPROACH:
+[one paragraph: what, in what order, and why over alternatives]
+
+CONFIDENCE: [30–100]
 ```
+
+The stop hook enforces `APPROACH:` (≥ 50 chars), `APPROACHES_CONSIDERED:` (≥ 1 entry), and `CONFIDENCE:` (≥ 30) before advancing to iteration 2.
 
 This addresses cold-start context loss — the agent maps the problem space before touching any code.
 
@@ -691,6 +717,17 @@ Loop 3:  /gulf-loop:start                      → implement feature B + integra
 Each loop completion appends `progress.txt` to `gulf-align.md`, so later loops inherit the full decision history from earlier ones.
 
 **Split signal**: if your RUBRIC has > 8–10 acceptance criteria, or you anticipate > 40 iterations — break the task into sequential loops.
+
+### Judge evolution — self-improving judgment
+
+In judge mode, the stop hook appends a `META:` principle to `JUDGE_EVOLUTION.md` after every judge decision:
+
+```
+[iter 3] REJECTED — prefer explicit error propagation over silent catch blocks
+[iter 5] APPROVED — consistent error structure across all async handlers
+```
+
+The last 40 lines of this file are fed back to the judge on every subsequent call. The judge sees its own accumulated reasoning — reducing repeated judgment errors across a long loop run.
 
 ### Structured memory wiki — cross-iteration knowledge base
 
@@ -790,6 +827,7 @@ Runtime files (created in your project directory during loop execution):
 your-project/
 ├── RUBRIC.md                   # Completion criteria (judge mode, you create this)
 ├── JUDGE_FEEDBACK.md           # Reflexion memory (auto-written by stop hook)
+├── JUDGE_EVOLUTION.md          # Judge growth log — accumulated judgment principles
 ├── progress.txt                # Working memory (agent writes each iteration)
 └── .claude/
     ├── gulf-loop.local.md      # Loop state file (frontmatter + original prompt)

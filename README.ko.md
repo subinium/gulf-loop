@@ -326,6 +326,18 @@ console.error로 출력하고 있지만 호출자에게 에러를 전파하지 �
 
 에이전트는 Phase 0에서 이 파일을 읽는다. 단순한 로그가 아니라 Reflexion 패턴에서의 언어적 실패 분석이다. 다음 반복의 추론 컨텍스트로 직접 주입된다.
 
+### JUDGE_EVOLUTION.md — judge 성장 로그
+
+매 judge 결정(승인 또는 거절)마다 원칙 하나를 추출해 기록한다:
+
+```
+[iter 3] REJECTED — silent catch 블록보다 명시적 에러 전파를 선호할 것
+[iter 5] APPROVED — 모든 async 핸들러에서 일관된 에러 구조 확인
+[iter 8] REJECTED — 경계 조건에서 하드코딩된 테스트 값 패턴 주의
+```
+
+이 파일의 최근 40줄이 매 judge 호출 시 다시 주입된다. judge는 자신이 누적한 판단 원칙을 바탕으로 — 긴 루프에서 반복적인 판단 오류를 줄이면서 — 더 일관된 평가를 하게 된다.
+
 ### progress.txt — 작업 기억 + 추론 추적
 
 에이전트가 매 반복 끝에 스스로 기록하는 파일. 단순한 할 일 목록이 아니라 **의사결정의 추론까지 담아야** 다음 반복 에이전트가 이어받을 수 있다:
@@ -632,12 +644,26 @@ Iteration 1은 전용 리서치 페이즈다. 에이전트는 소스 파일을 �
 ```
 ITERATION: 1 (research phase)
 
-STRENGTHS:   [Defender — 보존할 것]
-RISKS:       [Critic + Risk Scout — 순위가 매겨진 우려사항]
-GAPS:        [Gap Detector — 미명세 결정사항]
-APPROACH:    [한 단락: 무엇을, 어떤 순서로, 왜 이 방식인가]
-CONFIDENCE:  [0–100]
+STRENGTHS:
+- [Defender — 보존할 것]
+
+RISKS:
+- [Critic + Risk Scout — 순위가 매겨진 우려사항]
+
+GAPS:
+- [Gap Detector — 미명세 결정사항]
+
+APPROACHES_CONSIDERED:
+- [접근법 A]: [왜 기각했는가]
+- [접근법 B]: [왜 기각했는가]
+
+APPROACH:
+[한 단락: 무엇을, 어떤 순서로, 왜 이 방식인가]
+
+CONFIDENCE: [30–100]
 ```
+
+stop hook은 iteration 2 진입 전에 `APPROACH:`(50자 이상), `APPROACHES_CONSIDERED:`(1개 이상 항목), `CONFIDENCE:`(30 이상)를 강제 검증한다.
 
 이는 Cold-start 컨텍스트 부족 문제를 해소한다 — 에이전트가 코드를 건드리기 전에 문제 공간을 먼저 파악한다.
 
@@ -706,6 +732,17 @@ Loop 3:  /gulf-loop:start                      → 기능 B 구현 + 통합
 각 루프 완료 시 `progress.txt`가 `gulf-align.md`에 추가되므로, 이후 루프는 이전 루프의 전체 결정 이력을 상속한다.
 
 **분리 신호**: RUBRIC의 수락 기준이 8–10개 이상이거나, 반복 40회 이상이 예상되면 작업을 순차적 루프로 나눈다.
+
+### Judge 진화 — 자기 개선 판단
+
+judge 모드에서 stop hook은 매 judge 결정 후 `META:` 원칙을 `JUDGE_EVOLUTION.md`에 추가한다:
+
+```
+[iter 3] REJECTED — silent catch 블록보다 명시적 에러 전파를 선호할 것
+[iter 5] APPROVED — 모든 async 핸들러에서 일관된 에러 구조 확인
+```
+
+이 파일의 최근 40줄이 이후 모든 judge 호출 시 다시 주입된다. judge는 자신이 누적한 추론 패턴을 바탕으로 — 긴 루프에서 반복적인 판단 오류를 줄이면서 — 더 일관된 평가를 하게 된다.
 
 ### 구조화 메모리 위키 — 루프 간 지식 베이스
 
@@ -805,6 +842,7 @@ cd gulf-loop
 your-project/
 ├── RUBRIC.md                   # 완료 기준 (judge 모드, 직접 작성)
 ├── JUDGE_FEEDBACK.md           # Reflexion 메모리 (stop hook이 자동 기록)
+├── JUDGE_EVOLUTION.md          # Judge 성장 로그 — 누적된 판단 원칙
 ├── progress.txt                # 작업 기억 (에이전트가 매 반복 작성)
 └── .claude/
     ├── gulf-loop.local.md      # 루프 상태 파일 (프론트매터 + 원본 프롬프트)
