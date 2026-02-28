@@ -13,7 +13,7 @@ structured around the HCI concept of execution, evaluation, and envisioning gulf
 4. [Core Design Principles](#4-core-design-principles)
 5. [Components and Why](#5-components-and-why)
 6. [System Architecture](#6-system-architecture)
-7. [Three Modes and Trade-offs](#7-three-modes-and-trade-offs)
+7. [Four Modes and Trade-offs](#7-four-modes-and-trade-offs)
 8. [Autonomous Mode Design](#8-autonomous-mode-design)
 9. [Recent Additions](#9-recent-additions)
 10. [Install](#10-install)
@@ -246,6 +246,8 @@ cat JUDGE_FEEDBACK.md 2>/dev/null          # judge mode
 
 Why this exists: the agent starts every iteration with a nearly empty context (Lost-in-the-Middle). Without Phase 0, it redoes already-completed work or repeats failed approaches. **Budget: ≤20% of context** — reading more leaves insufficient context for the actual work.
 
+> **Iteration 1 (research phase)**: Before Phase 0–4 runs, iteration 1 is dedicated to analysis only. The stop hook validates that `progress.txt` contains an `APPROACH:` field before advancing — if not, iteration 1 is retried. Implementation begins in iteration 2.
+
 #### Phase 1–4: Atomic execution
 
 Implement exactly one atomic unit per iteration. One feature, one bug fix, one test addition.
@@ -318,21 +320,25 @@ ORIGINAL_GOAL: [copy from gulf-align.md or RUBRIC — never change]
 ITERATION: 3
 
 COMPLETED:
-- user creation endpoint (chose argon2id over bcrypt — 72-byte limit, password shucking risk)
+- user creation endpoint (confidence: 90)
+
+DECISIONS:
+- chose: argon2id, rejected: bcrypt, reason: 72-byte limit + password shucking risk, revisit_if: bcrypt parity required
+
+UNCERTAINTIES:
+- rate limiting edge cases not yet verified
 
 REMAINING_GAP:
-- password hashing
-- rate limiting edge cases (not yet verified)
+- password hashing implementation
 
 CONFIDENCE: 75
-LAST_DECISION: argon2id — stronger memory-hardness than bcrypt, current OWASP recommendation
 ```
 
 Written this way, the next iteration's agent doesn't need to re-investigate "why argon2id." The structured format prevents goal drift across iterations (OnGoal, UIST 2025).
 
-### .claude/autochecks.sh — automated verification for basic mode
+### .claude/autochecks.sh — automated verification
 
-Even without a judge, completion claims can be verified in basic mode. Runs after completion signal detection. On failure: completion rejected + failure output re-injected.
+Even without a judge, completion claims can be verified. In basic mode: runs after completion signal detection. In autonomous mode: also runs post-rebase before merging. On failure: completion rejected + failure output re-injected.
 
 ```bash
 # .claude/autochecks.sh
@@ -412,14 +418,14 @@ The three modes are not different systems. They are the same stop hook with diff
 | Mode | Envisioning | Gate 3 | Branch strategy | When to use |
 |------|-------------|--------|----------------|-------------|
 | **align** | saves gulf-align.md | — (not a loop) | — | Surface gaps before the loop |
-| **basic** | reads gulf-align.md | none (no judge) | current branch | When tests are sufficient to cover completion |
+| **basic** | reads gulf-align.md | none (optional autochecks.sh) | current branch | When tests are sufficient to cover completion |
 | **judge** | reads gulf-align.md | HITL pause | current branch | When code quality/design criteria matter and human can intervene |
 | **autonomous** | reads gulf-align.md | strategy reset | dedicated branch + auto-merge | When unattended long-running execution is needed |
 | **parallel** | reads gulf-align.md | strategy reset × N | N worktrees + serialized merge | When exploring the same goal with parallel strategies |
 
 ---
 
-## 7. Three Modes and Trade-offs
+## 7. Four Modes and Trade-offs
 
 ### Basic mode
 
@@ -439,34 +445,54 @@ The three modes are not different systems. They are the same stop hook with diff
 
 **Trade-off**: no HITL. If the agent runs in the wrong direction, no human intervenes. Strategy reset replaces HITL, but this judgment is also automated. **Autonomous mode is not "better" mode.** It is a trade-off: you give up human judgment in exchange for throughput.
 
+### Parallel mode
+
+**Completion condition**: same as basic or judge (per worker) — each worker merges its branch to the base branch independently when done.
+
+**Trade-off**: requires opening N separate Claude Code sessions manually after setup. Non-determinism is a feature — workers run the same PROMPT but can diverge in approach. Best for exploratory execution (multiple strategies for the same goal) or redundancy. For decomposed sub-tasks (different goals), run separate sequential loops instead.
+
 ### Stop hook flow
 
 #### Basic mode
 ```
 Stop event
   ├── No state file → allow stop
-  ├── iteration >= max_iterations → stop
+  ├── active: false (paused) → show resume instructions, exit
+  ├── iteration ≥ max_iterations → delete state file, stop
+  ├── milestone_every > 0 AND iteration % milestone_every == 0
+  │     → set active: false, pause_reason: milestone, exit
+  │       (review progress.txt → /gulf-loop:resume to continue)
+  ├── iteration == 1 AND progress.txt missing APPROACH: field
+  │     → re-inject without incrementing (research phase gate)
+  │       (agent retries iteration 1 until APPROACH: is written)
   ├── <promise>COMPLETE</promise> in last message
   │     .claude/autochecks.sh exists? → run it
-  │       Pass → stop (or _try_merge if autonomous)
-  │       Fail → re-inject with failure output
-  │     No autochecks.sh → stop (or _try_merge if autonomous)
+  │       Pass → _on_complete: append progress.txt → gulf-align.md, delete state
+  │       Fail → increment, re-inject with failure output
+  │     No autochecks.sh → _on_complete, stop
   └── Otherwise → increment iteration, re-inject prompt + framework
 ```
 
 #### Judge mode
 ```
 Stop event
-  ├── [Checks Gate] Run RUBRIC.md ## Checks
-  │     Any fail → re-inject with failure details (no Opus call)
+  ├── No state file → allow stop
+  ├── active: false (paused) → show resume instructions, exit
+  ├── iteration ≥ max_iterations → delete state file, stop
+  ├── milestone_every > 0 AND iteration % milestone_every == 0
+  │     → set active: false, pause_reason: milestone, exit
+  ├── iteration == 1 AND progress.txt missing APPROACH: field
+  │     → re-inject without incrementing (research phase gate)
+  ├── [Checks Gate] Run RUBRIC.md ## Checks — all commands must exit 0
+  │     Any fail → increment, re-inject with failure details (no Opus call)
   │     All pass → output becomes LLM behavioral evidence ↓
   ├── [Judge] Claude Opus evaluates:
-  │     - ## Checks output (behavioral evidence)
-  │     - changed source files (actual content, not diff)
-  │     - ## Judge criteria
-  │     APPROVED → stop (or _try_merge if autonomous)
-  │     REJECTED → write JUDGE_FEEDBACK.md, re-inject with reason
-  │     N consecutive rejections → HITL pause (or strategy reset if autonomous)
+  │     1. ## Checks output (behavioral evidence — what the code actually does)
+  │     2. Changed source files (actual content, not diff)
+  │     3. ## Judge criteria (natural-language requirements)
+  │     APPROVED → _on_complete: append progress.txt → gulf-align.md, delete state
+  │     REJECTED → write JUDGE_FEEDBACK.md, increment, re-inject with reason
+  │     N consecutive REJECTED → HITL pause (judge) or strategy reset (autonomous)
 ```
 
 ---
@@ -682,6 +708,46 @@ Restart Claude Code after install.
 ./install.sh --uninstall   # remove completely
 ```
 
+### Plugin file structure
+
+After install, the plugin lives at `~/.claude/plugins/gulf-loop/`:
+
+```
+~/.claude/plugins/gulf-loop/
+├── hooks/stop-hook.sh          # Core loop mechanism — fires on every Stop event
+├── scripts/
+│   ├── setup.sh                # Loop initializer (all 4 modes)
+│   ├── run-judge.sh            # Execution-first LLM evaluator
+│   ├── run-align.sh            # Alignment phase prereq check
+│   ├── resume-loop.sh          # Resume from HITL/milestone pause
+│   ├── cancel-loop.sh          # Cancel active loop
+│   └── status-loop.sh          # Show current iteration
+└── prompts/framework.md        # Phase 0–4 framework injected every iteration
+
+~/.claude/commands/             # Installed slash commands
+├── gulf-loop:align.md
+├── gulf-loop:start.md
+├── gulf-loop:start-with-judge.md
+├── gulf-loop:start-autonomous.md
+├── gulf-loop:start-parallel.md
+├── gulf-loop:resume.md
+├── gulf-loop:cancel.md
+└── gulf-loop:status.md
+```
+
+Runtime files (created in your project directory during loop execution):
+
+```
+your-project/
+├── RUBRIC.md                   # Completion criteria (judge mode, you create this)
+├── JUDGE_FEEDBACK.md           # Reflexion memory (auto-written by stop hook)
+├── progress.txt                # Working memory (agent writes each iteration)
+└── .claude/
+    ├── gulf-loop.local.md      # Loop state file (frontmatter + original prompt)
+    ├── gulf-align.md           # Alignment memory (from /gulf-loop:align or manual)
+    └── autochecks.sh           # Optional: automated checks for basic/autonomous mode
+```
+
 **Requirements**: Claude Code ≥ 1.0.33, `jq`
 
 ---
@@ -755,10 +821,10 @@ Then open each printed worktree path in a separate Claude Code session and run `
 | Command | Description |
 |---------|-------------|
 | `/gulf-loop:align` | **Run before starting** — surfaces envisioning/execution/evaluation gaps, saves `gulf-align.md` |
-| `/gulf-loop:start PROMPT [--max-iterations N] [--completion-promise TEXT]` | Basic loop |
-| `/gulf-loop:start-with-judge PROMPT [--max-iterations N] [--hitl-threshold N]` | Loop with judge |
-| `/gulf-loop:start-autonomous PROMPT [--max-iterations N] [--base-branch BRANCH] [--with-judge]` | Autonomous loop (no HITL) |
-| `/gulf-loop:start-parallel PROMPT --workers N [--max-iterations N] [--base-branch BRANCH]` | Parallel worktree loops |
+| `/gulf-loop:start PROMPT [--max-iterations N] [--completion-promise TEXT] [--milestone-every N]` | Basic loop |
+| `/gulf-loop:start-with-judge PROMPT [--max-iterations N] [--hitl-threshold N] [--milestone-every N]` | Loop with judge |
+| `/gulf-loop:start-autonomous PROMPT [--max-iterations N] [--base-branch BRANCH] [--with-judge] [--hitl-threshold N] [--milestone-every N]` | Autonomous loop (no HITL) |
+| `/gulf-loop:start-parallel PROMPT --workers N [--max-iterations N] [--base-branch BRANCH] [--with-judge] [--milestone-every N]` | Parallel worktree loops |
 | `/gulf-loop:status` | Current iteration count |
 | `/gulf-loop:cancel` | Stop the loop |
 | `/gulf-loop:resume` | Resume after HITL pause (or start pre-initialized worktree) |
