@@ -32,7 +32,7 @@ MODEL=$(awk '
   count == 1 && /^model:/ { sub(/^model:[[:space:]]*/, ""); gsub(/"/, ""); print; exit }
   count == 2 { exit }
 ' "$RUBRIC_FILE")
-MODEL="${MODEL:-claude-opus-4-6}"
+MODEL="${MODEL:-claude-sonnet-4-6}"
 
 # ── 3. Extract sections from RUBRIC.md ───────────────────────────
 _section() {
@@ -80,10 +80,10 @@ if [[ -n "$CONTRACTS" ]]; then
       FAIL_COUNT=$((FAIL_COUNT + 1))
     fi
 
-    # Truncate per-contract output to keep prompt manageable
+    # Truncate per-contract output — keep TAIL (failures appear at end)
     if [[ ${#CONTRACT_OUTPUT} -gt 600 ]]; then
-      CONTRACT_OUTPUT="${CONTRACT_OUTPUT:0:600}
-... [output truncated at 600 chars]"
+      CONTRACT_OUTPUT="[output truncated — showing last 600 chars]
+...${CONTRACT_OUTPUT: -600}"
     fi
 
     STATUS="PASS"
@@ -215,15 +215,15 @@ A failing contract is a hard failure regardless of criterion quality."
 
 # ── 9. Call Claude judge ──────────────────────────────────────────
 RESULT=$(printf '%s' "$JUDGE_PROMPT" \
-  | claude --model "$MODEL" --print 2>/dev/null \
-  || echo "APPROVED")  # Fail open: if claude CLI errors, don't block the loop
+  | timeout 120 claude --model "$MODEL" --print 2>/dev/null \
+  || echo "CHECKS_FAILED: judge API unavailable (timeout or error)")
 
-# Normalize: trim whitespace, ensure output starts with APPROVED or REJECTED
+# Normalize: trim whitespace, ensure output starts with APPROVED or REJECTED/CHECKS_FAILED
 RESULT=$(echo "$RESULT" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
 
-if echo "$RESULT" | grep -qiE '^(APPROVED|REJECTED)'; then
+if echo "$RESULT" | grep -qiE '^(APPROVED|REJECTED|CHECKS_FAILED)'; then
   echo "$RESULT"
 else
-  # Unexpected output — treat as approved to avoid blocking
-  echo "APPROVED"
+  # Unexpected output format — treat as checks failed, not approved
+  echo "CHECKS_FAILED: judge returned unexpected output: ${RESULT:0:100}"
 fi

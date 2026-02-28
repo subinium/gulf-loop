@@ -73,11 +73,19 @@ WORKTREE_PATH=$(_field "worktree_path" "")
 [[ "$HITL_THRESHOLD" =~ ^[0-9]+$ ]]  || HITL_THRESHOLD=5
 [[ "$MILESTONE_EVERY" =~ ^[0-9]+$ ]] || MILESTONE_EVERY=0
 
-# ── 4. HITL pause check ───────────────────────────────────────────
+# ── 4. Pause check (HITL gate or milestone) ───────────────────────
 if [[ "$ACTIVE" == "false" ]]; then
-  # Autonomous mode never sets active: false, so this only triggers in HITL mode
-  echo "[gulf-loop] Loop is paused (HITL gate). Check JUDGE_FEEDBACK.md." >&2
-  echo "  To resume: edit RUBRIC.md then run /gulf-loop:resume" >&2
+  PAUSE_REASON=$(awk '
+    /^---$/ { count++; next }
+    count == 1 && /^pause_reason:/ { sub(/^pause_reason:[[:space:]]*/, ""); print; exit }
+  ' "$STATE_FILE")
+  if [[ "$PAUSE_REASON" == "milestone" ]]; then
+    echo "[gulf-loop] Loop is paused at milestone checkpoint." >&2
+    echo "  Review progress.txt, then /gulf-loop:resume to continue." >&2
+  else
+    echo "[gulf-loop] Loop is paused (HITL gate). Check JUDGE_FEEDBACK.md." >&2
+    echo "  To resume: edit RUBRIC.md then run /gulf-loop:resume" >&2
+  fi
   echo "  To cancel: run /gulf-loop:cancel" >&2
   exit 0
 fi
@@ -107,10 +115,11 @@ if [[ "$MILESTONE_EVERY" -gt 0 ]]; then
   _NEXT_ITER=$(( ITERATION + 1 ))
   _NEXT_MILESTONE=$(( (_NEXT_ITER + MILESTONE_EVERY - 1) / MILESTONE_EVERY * MILESTONE_EVERY ))
   MILESTONE_INFO="**Milestone mode**: loop pauses every $MILESTONE_EVERY iterations for human review. Next pause: iteration $_NEXT_MILESTONE."
+  FRAMEWORK="${FRAMEWORK//\{MILESTONE_INFO\}/$MILESTONE_INFO}"
 else
-  MILESTONE_INFO=""
+  # Remove the placeholder line entirely (no blank line residue)
+  FRAMEWORK=$(printf '%s\n' "$FRAMEWORK" | awk '!/^\{MILESTONE_INFO\}$/')
 fi
-FRAMEWORK="${FRAMEWORK//\{MILESTONE_INFO\}/$MILESTONE_INFO}"
 
 if [[ -z "$(echo "$PROMPT" | tr -d '[:space:]')" ]]; then
   echo "[gulf-loop] ERROR: Empty prompt body in $STATE_FILE. Stopping." >&2
@@ -125,6 +134,20 @@ _update_field() {
     $0 ~ "^"f":" { print f ": " v; next }
     { print }
   ' "$STATE_FILE" > "${STATE_FILE}.tmp" && mv "${STATE_FILE}.tmp" "$STATE_FILE"
+}
+
+# ── Helper: set field (update if exists, insert before closing --- if not) ──
+_set_field() {
+  local field="$1" value="$2"
+  if grep -q "^${field}:" "$STATE_FILE" 2>/dev/null; then
+    _update_field "$field" "$value"
+  else
+    awk -v f="$field" -v v="$value" '
+      BEGIN { cnt=0; done=0 }
+      /^---$/ { cnt++; if (cnt==2 && !done) { print f ": " v; done=1 } }
+      { print }
+    ' "$STATE_FILE" > "${STATE_FILE}.tmp" && mv "${STATE_FILE}.tmp" "$STATE_FILE"
+  fi
 }
 
 # ── Helper: emit block decision ───────────────────────────────────
@@ -227,7 +250,7 @@ _try_merge() {
   # Cleanup worktree after successful merge
   if [[ "$IN_WORKTREE" == "true" ]]; then
     local WT_PATH
-    WT_PATH=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+    WT_PATH="${WORKTREE_PATH:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
     git -C "$MAIN_REPO" worktree remove --force "$WT_PATH" 2>/dev/null || true
     git -C "$MAIN_REPO" branch -d "$BRANCH" 2>/dev/null || true
   fi
@@ -245,6 +268,8 @@ NEXT=$((ITERATION + 1))
 if [[ "$MILESTONE_EVERY" -gt 0 && "$ITERATION" -gt 0 && $((ITERATION % MILESTONE_EVERY)) -eq 0 ]]; then
   echo "[gulf-loop] Milestone: iteration $ITERATION (every $MILESTONE_EVERY). Pausing for review." >&2
   echo "  Review progress.txt, then /gulf-loop:resume to continue." >&2
+  _update_field "iteration" "$NEXT"      # advance so resume doesn't re-trigger
+  _set_field "pause_reason" "milestone"
   _update_field "active" "false"
   exit 0
 fi
@@ -316,6 +341,7 @@ if [[ "$JUDGE_ENABLED" == "true" ]]; then
     else
       echo "[gulf-loop] HITL gate: Judge rejected $NEXT_CONSEC consecutive time(s). Loop paused." >&2
       echo "  Review JUDGE_FEEDBACK.md, update RUBRIC.md if needed, then resume." >&2
+      _set_field "pause_reason" "hitl"
       _update_field "active" "false"
       exit 0
     fi

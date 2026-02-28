@@ -84,6 +84,10 @@ if [[ "$MODE" == "autonomous" || "$MODE" == "parallel" ]]; then
   [[ -z "$BASE_BRANCH" ]] && BASE_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
 fi
 
+if [[ ! -f ".claude/gulf-align.md" ]]; then
+  echo "TIP: /gulf-loop:align not run. Run it first to surface spec gaps before the loop starts." >&2
+fi
+
 # ── Helper: write state file ──────────────────────────────────────
 _state() {
   local path="$1" branch="${2:-}" autonomous="${3:-false}" judge="${4:-false}" worktree="${5:-}"
@@ -169,6 +173,7 @@ case "$MODE" in
       echo "  Worker $((i+1)):  cd ${WORKTREE_PATHS[$i]}  →  claude  →  /gulf-loop:resume"
     done
     echo "Merges serialize to: $BASE_BRANCH"
+    [[ "$MILESTONE_EVERY" -gt 0 ]] && echo "Milestone          : every $MILESTONE_EVERY iterations"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     ;;
 esac

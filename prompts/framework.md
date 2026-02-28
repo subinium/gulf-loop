@@ -108,8 +108,6 @@ Using this format passes decision rationale to the next iteration — not just c
 
 ---
 
----
-
 ### Autonomous mode — Git workflow
 
 > This section applies when `autonomous: true` (running on branch `{BRANCH}`).
