@@ -368,6 +368,17 @@ _research_gate() {
   if [[ ${#approach_body} -lt 50 ]]; then
     echo "approach_too_short"; return
   fi
+  grep -q "^APPROACHES_CONSIDERED:" "$pf" || { echo "no_approaches_considered"; return; }
+  local approaches_count
+  approaches_count=$(awk '
+    /^APPROACHES_CONSIDERED:/ { found=1; next }
+    found && /^- / { count++ }
+    found && /^[A-Z_]+:/ { exit }
+    END { print count+0 }
+  ' "$pf" 2>/dev/null || echo "0")
+  if [[ "$approaches_count" -lt 1 ]]; then
+    echo "approaches_considered_empty"; return
+  fi
   local confidence
   confidence=$(grep "^CONFIDENCE:" "$pf" 2>/dev/null \
     | sed 's/^CONFIDENCE:[[:space:]]*//' | tr -d '[:space:]' | head -1)
@@ -400,28 +411,54 @@ CONFIDENCE: 80
 EOF
 _assert "research gate: APPROACH too short"  "approach_too_short" "$(_research_gate "$RGTMP/p2.txt")"
 
-# CONFIDENCE missing
+# APPROACHES_CONSIDERED missing
 cat > "$RGTMP/p3.txt" << 'EOF'
 ORIGINAL_GOAL: test
 ITERATION: 1 (research phase)
 APPROACH: This is a sufficiently long approach paragraph that explains what will be built and in what order.
+CONFIDENCE: 80
 EOF
-_assert "research gate: missing CONFIDENCE"  "no_confidence"    "$(_research_gate "$RGTMP/p3.txt")"
+_assert "research gate: missing APPROACHES_CONSIDERED" "no_approaches_considered" "$(_research_gate "$RGTMP/p3.txt")"
 
-# CONFIDENCE too low
+# APPROACHES_CONSIDERED exists but empty (no bullet entries)
+cat > "$RGTMP/p3b.txt" << 'EOF'
+ORIGINAL_GOAL: test
+ITERATION: 1 (research phase)
+APPROACH: This is a sufficiently long approach paragraph that explains what will be built and in what order.
+APPROACHES_CONSIDERED:
+CONFIDENCE: 80
+EOF
+_assert "research gate: APPROACHES_CONSIDERED empty" "approaches_considered_empty" "$(_research_gate "$RGTMP/p3b.txt")"
+
+# CONFIDENCE missing
 cat > "$RGTMP/p4.txt" << 'EOF'
 ORIGINAL_GOAL: test
 ITERATION: 1 (research phase)
 APPROACH: This is a sufficiently long approach paragraph that explains what will be built and in what order.
+APPROACHES_CONSIDERED:
+- approach A: too complex, requires external service
+EOF
+_assert "research gate: missing CONFIDENCE"  "no_confidence"    "$(_research_gate "$RGTMP/p4.txt")"
+
+# CONFIDENCE too low
+cat > "$RGTMP/p4b.txt" << 'EOF'
+ORIGINAL_GOAL: test
+ITERATION: 1 (research phase)
+APPROACH: This is a sufficiently long approach paragraph that explains what will be built and in what order.
+APPROACHES_CONSIDERED:
+- approach A: too complex, requires external service
 CONFIDENCE: 20
 EOF
-_assert "research gate: CONFIDENCE too low"  "confidence_low"   "$(_research_gate "$RGTMP/p4.txt")"
+_assert "research gate: CONFIDENCE too low"  "confidence_low"   "$(_research_gate "$RGTMP/p4b.txt")"
 
 # Valid — all checks pass
 cat > "$RGTMP/p5.txt" << 'EOF'
 ORIGINAL_GOAL: test
 ITERATION: 1 (research phase)
 APPROACH: This is a sufficiently long approach paragraph that explains what will be built and in what order. It also explains why this approach was chosen over the alternatives.
+APPROACHES_CONSIDERED:
+- approach A: rejected because it requires a database migration
+- approach B: rejected because it breaks existing API contract
 CONFIDENCE: 75
 EOF
 _assert "research gate: valid progress.txt"  "pass"             "$(_research_gate "$RGTMP/p5.txt")"
@@ -431,6 +468,8 @@ cat > "$RGTMP/p6.txt" << 'EOF'
 ORIGINAL_GOAL: test
 ITERATION: 1 (research phase)
 APPROACH: This is a sufficiently long approach paragraph that explains what will be built and in what order.
+APPROACHES_CONSIDERED:
+- approach A: too risky for the timeline
 CONFIDENCE: 30
 EOF
 _assert "research gate: CONFIDENCE=30 passes" "pass"            "$(_research_gate "$RGTMP/p6.txt")"

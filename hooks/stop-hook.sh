@@ -118,8 +118,8 @@ if [[ "$MILESTONE_EVERY" -gt 0 ]]; then
   MILESTONE_INFO="**Milestone mode**: loop pauses every $MILESTONE_EVERY iterations for human review. Next pause: iteration $_NEXT_MILESTONE."
   FRAMEWORK="${FRAMEWORK//\{MILESTONE_INFO\}/$MILESTONE_INFO}"
 else
-  # Remove the placeholder line entirely (no blank line residue)
-  FRAMEWORK=$(printf '%s\n' "$FRAMEWORK" | awk '!/^\{MILESTONE_INFO\}$/')
+  # Remove the placeholder regardless of position (handles inline and standalone)
+  FRAMEWORK="${FRAMEWORK//\{MILESTONE_INFO\}/}"
 fi
 
 if [[ -z "$(echo "$PROMPT" | tr -d '[:space:]')" ]]; then
@@ -370,7 +370,24 @@ if [[ "$ITERATION" -eq 1 ]]; then
     fi
   fi
 
-  # Check 3: CONFIDENCE: is numeric and >= 30
+  # Check 3: APPROACHES_CONSIDERED: exists and has at least one entry
+  if [[ -z "$RESEARCH_FAIL_REASON" ]]; then
+    if ! grep -q "^APPROACHES_CONSIDERED:" "progress.txt" 2>/dev/null; then
+      RESEARCH_FAIL_REASON="**Missing**: \`APPROACHES_CONSIDERED:\` field is required. List 2–3 alternative approaches you evaluated and why you rejected each."
+    else
+      APPROACHES_COUNT=$(awk '
+        /^APPROACHES_CONSIDERED:/ { found=1; next }
+        found && /^- / { count++ }
+        found && /^[A-Z_]+:/ { exit }
+        END { print count+0 }
+      ' "progress.txt" 2>/dev/null || echo "0")
+      if [[ "$APPROACHES_COUNT" -lt 1 ]]; then
+        RESEARCH_FAIL_REASON="**Empty**: \`APPROACHES_CONSIDERED:\` has no entries. Add at least one alternative approach with a reason for rejecting it (e.g. \`- approach A: why rejected\`)."
+      fi
+    fi
+  fi
+
+  # Check 4: CONFIDENCE: is numeric and >= 30
   if [[ -z "$RESEARCH_FAIL_REASON" ]]; then
     CONFIDENCE_VAL=$(grep "^CONFIDENCE:" "progress.txt" 2>/dev/null \
       | sed 's/^CONFIDENCE:[[:space:]]*//' | tr -d '[:space:]' | head -1)
