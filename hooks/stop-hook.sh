@@ -65,6 +65,7 @@ BRANCH=$(_field "branch" "")
 BASE_BRANCH=$(_field "base_branch" "main")
 MILESTONE_EVERY=$(_field "milestone_every" "0")
 WORKTREE_PATH=$(_field "worktree_path" "")
+STRUCTURED_MEMORY=$(_field "structured_memory" "false")
 
 # Validate numerics
 [[ "$ITERATION" =~ ^[0-9]+$ ]]       || ITERATION=1
@@ -151,9 +152,60 @@ _set_field() {
 }
 
 # ── Helper: successful loop completion ───────────────────────────
-# Appends progress.txt to gulf-align.md (inter-loop epistemic handoff),
-# then removes the state file. Call only on CLEAN completion, not on timeout.
+# 1. If structured memory is enabled: archives loops/current.md → loops/loop-NNN.md
+#    and inserts a link in INDEX.md.
+# 2. Appends progress.txt to gulf-align.md (inter-loop epistemic handoff).
+# 3. Removes the state file.
+# Call only on CLEAN completion, not on timeout.
 _on_complete() {
+  local mem=".claude/memory"
+
+  # ── structured memory archival ────────────────────────────────────
+  if [[ "$STRUCTURED_MEMORY" == "true" && -d "$mem/loops" ]]; then
+    local existing_count loop_num archive_path link
+    existing_count=$(find "$mem/loops" -name 'loop-*.md' -maxdepth 1 2>/dev/null | wc -l | tr -d ' ')
+    loop_num=$(printf '%03d' "$((existing_count + 1))")
+    archive_path="$mem/loops/loop-${loop_num}.md"
+
+    {
+      printf '# Loop %s — completed %s (iteration %s)\n\n' \
+        "$loop_num" "$(date '+%Y-%m-%d %H:%M:%S')" "$ITERATION"
+      cat "$mem/loops/current.md" 2>/dev/null || true
+      if [[ -f "progress.txt" ]]; then
+        printf '\n## progress.txt snapshot\n\n'
+        cat "progress.txt"
+      fi
+    } > "$archive_path"
+
+    # insert link in INDEX.md before the closing <!-- loop-archive-end --> marker
+    if [[ -f "$mem/INDEX.md" ]] && grep -q '<!-- loop-archive-end -->' "$mem/INDEX.md"; then
+      link="- [Loop ${loop_num}](loops/loop-${loop_num}.md) — $(date '+%Y-%m-%d') (iter ${ITERATION})"
+      awk -v l="$link" \
+        '/<!-- loop-archive-end -->/ { print l }
+         { print }' \
+        "$mem/INDEX.md" > "$mem/INDEX.md.tmp" && mv "$mem/INDEX.md.tmp" "$mem/INDEX.md"
+    fi
+
+    # reset loops/current.md for the next run
+    cat > "$mem/loops/current.md" << 'MDEOF'
+# Current Loop Progress
+
+> Reset at loop start. Archived to loops/loop-NNN.md by _on_complete().
+
+## Completed this loop
+- (agent: append as tasks finish)
+
+## Key decisions
+- (agent: chose X over Y because Z)
+
+## Blockers / open questions
+- (agent: fill in)
+MDEOF
+
+    echo "[gulf-loop] Memory loop archived to $archive_path" >&2
+  fi
+
+  # ── gulf-align.md handoff ─────────────────────────────────────────
   if [[ -f "progress.txt" ]]; then
     mkdir -p ".claude"
     {

@@ -38,6 +38,14 @@ If `.claude/gulf-align.md` exists, read it first — it contains the agreed-upon
 spec, process, and evaluation contract. Deviating from it without updating it
 is a convergence failure.
 
+If `.claude/memory/` exists (structured memory mode), read the index first:
+
+```
+cat .claude/memory/INDEX.md 2>/dev/null    # master index — follow links to relevant files
+```
+
+Then follow links in INDEX.md to files relevant to the current task (e.g. `spec.md`, `map.md`, relevant `decisions/*.md`). Do NOT read all files — read only what you need to decide the next step.
+
 If `progress.txt` contains `ITERATION: 1 (research phase)`, this is the first
 implementation iteration — treat `APPROACH` as your starting plan.
 
@@ -90,6 +98,20 @@ Then identify: what is the next incomplete task?
 | `JUDGE_FEEDBACK.md` (if judge mode) | |
 
 Write to disk anything you need to remember.
+
+#### Memory wiki maintenance (structured memory mode only)
+
+If `.claude/memory/` exists, maintain these files as you work:
+
+| File | When to update |
+|------|---------------|
+| `spec.md` | Iteration 1 only — fill in Goal, criteria, out-of-scope |
+| `map.md` | Any time you discover a key file or pattern not already listed |
+| `constraints.md` | When you hit a constraint: `[iter N] constraint description` (append-only) |
+| `decisions/<topic>.md` | When you make a significant technical decision — create per-topic files |
+| `loops/current.md` | Append completed tasks and key decisions as you go |
+
+`INDEX.md` is managed automatically by the stop hook on loop completion. Do not edit the `<!-- loop-archive-* -->` markers manually.
 
 #### Structured `progress.txt` format (recommended)
 

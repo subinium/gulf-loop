@@ -219,6 +219,135 @@ rm "$STATE_FILE"
 
 cd "$PLUGIN_ROOT"
 
+# ── Group 7: --structured-memory scaffold ─────────────────────────
+echo "── --structured-memory: scaffold creation ───────────────────"
+
+SMTMP=$(mktemp -d)
+trap 'rm -rf "$SMTMP"' EXIT
+
+(
+  cd "$SMTMP"
+  bash "$PLUGIN_ROOT/scripts/setup.sh" --mode basic --structured-memory "test prompt" >/dev/null 2>&1
+)
+
+_assert "scaffold: .claude/memory/INDEX.md exists"          "yes" \
+  "$( [[ -f "$SMTMP/.claude/memory/INDEX.md" ]]          && echo yes || echo no )"
+_assert "scaffold: .claude/memory/spec.md exists"           "yes" \
+  "$( [[ -f "$SMTMP/.claude/memory/spec.md" ]]           && echo yes || echo no )"
+_assert "scaffold: .claude/memory/map.md exists"            "yes" \
+  "$( [[ -f "$SMTMP/.claude/memory/map.md" ]]            && echo yes || echo no )"
+_assert "scaffold: .claude/memory/constraints.md exists"    "yes" \
+  "$( [[ -f "$SMTMP/.claude/memory/constraints.md" ]]    && echo yes || echo no )"
+_assert "scaffold: .claude/memory/loops/current.md exists"  "yes" \
+  "$( [[ -f "$SMTMP/.claude/memory/loops/current.md" ]]  && echo yes || echo no )"
+_assert "scaffold: .claude/memory/decisions/ dir exists"    "yes" \
+  "$( [[ -d "$SMTMP/.claude/memory/decisions" ]]         && echo yes || echo no )"
+_assert "scaffold: structured_memory in state file"         "true" \
+  "$( grep -q '^structured_memory: true' "$SMTMP/.claude/gulf-loop.local.md" 2>/dev/null && echo true || echo false )"
+
+# Re-run should NOT overwrite existing scaffold
+echo "overwritten" >> "$SMTMP/.claude/memory/INDEX.md"
+(
+  cd "$SMTMP"
+  bash "$PLUGIN_ROOT/scripts/setup.sh" --mode basic --structured-memory "test prompt 2" >/dev/null 2>&1
+)
+_assert "scaffold: idempotent (existing dir not overwritten)" "1" \
+  "$(grep -c 'overwritten' "$SMTMP/.claude/memory/INDEX.md")"
+
+# ── Group 8: _on_complete() loop archival ─────────────────────────
+echo "── _on_complete(): loop archival ────────────────────────────"
+
+ARCTMP=$(mktemp -d)
+# Set up simulated structured memory scaffold
+mkdir -p "$ARCTMP/.claude/memory/loops" "$ARCTMP/.claude/memory/decisions"
+cat > "$ARCTMP/.claude/memory/INDEX.md" << 'EOF'
+# Index
+## Loop archive
+<!-- loop-archive-start -->
+<!-- loop-archive-end -->
+EOF
+cat > "$ARCTMP/.claude/memory/loops/current.md" << 'EOF'
+# Current Loop Progress
+## Completed this loop
+- did task A
+EOF
+cat > "$ARCTMP/progress.txt" << 'EOF'
+ORIGINAL_GOAL: test
+ITERATION: 3
+CONFIDENCE: 90
+EOF
+# Write a minimal state file
+cat > "$ARCTMP/.claude/gulf-loop.local.md" << 'EOF'
+---
+active: true
+iteration: 3
+max_iterations: 10
+structured_memory: true
+completion_promise: "COMPLETE"
+---
+test prompt
+EOF
+
+# Source the _on_complete logic inline (replicated to stay in sync)
+(
+  cd "$ARCTMP"
+  ITERATION=3
+  STRUCTURED_MEMORY=true
+  STATE_FILE=".claude/gulf-loop.local.md"
+  mem=".claude/memory"
+
+  existing_count=$(find "$mem/loops" -name 'loop-*.md' -maxdepth 1 2>/dev/null | wc -l | tr -d ' ')
+  loop_num=$(printf '%03d' "$((existing_count + 1))")
+  archive_path="$mem/loops/loop-${loop_num}.md"
+
+  {
+    printf '# Loop %s — completed %s (iteration %s)\n\n' \
+      "$loop_num" "$(date '+%Y-%m-%d %H:%M:%S')" "$ITERATION"
+    cat "$mem/loops/current.md" 2>/dev/null || true
+    if [[ -f "progress.txt" ]]; then
+      printf '\n## progress.txt snapshot\n\n'
+      cat "progress.txt"
+    fi
+  } > "$archive_path"
+
+  if [[ -f "$mem/INDEX.md" ]] && grep -q '<!-- loop-archive-end -->' "$mem/INDEX.md"; then
+    link="- [Loop ${loop_num}](loops/loop-${loop_num}.md) — $(date '+%Y-%m-%d') (iter ${ITERATION})"
+    awk -v l="$link" \
+      '/<!-- loop-archive-end -->/ { print l }
+       { print }' \
+      "$mem/INDEX.md" > "$mem/INDEX.md.tmp" && mv "$mem/INDEX.md.tmp" "$mem/INDEX.md"
+  fi
+)
+
+_assert "archival: loop-001.md created" "yes" \
+  "$( [[ -f "$ARCTMP/.claude/memory/loops/loop-001.md" ]] && echo yes || echo no )"
+_assert "archival: loop-001.md contains current loop content" "1" \
+  "$(grep -c 'did task A' "$ARCTMP/.claude/memory/loops/loop-001.md")"
+_assert "archival: loop-001.md contains progress.txt snapshot" "1" \
+  "$(grep -c 'ORIGINAL_GOAL' "$ARCTMP/.claude/memory/loops/loop-001.md")"
+_assert "archival: INDEX.md link inserted" "1" \
+  "$(grep -c '\[Loop 001\]' "$ARCTMP/.claude/memory/INDEX.md")"
+_assert "archival: INDEX.md marker preserved" "1" \
+  "$(grep -c '<!-- loop-archive-end -->' "$ARCTMP/.claude/memory/INDEX.md")"
+
+# Second archival should create loop-002.md
+(
+  cd "$ARCTMP"
+  mem=".claude/memory"
+  existing_count=$(find "$mem/loops" -name 'loop-*.md' -maxdepth 1 2>/dev/null | wc -l | tr -d ' ')
+  loop_num=$(printf '%03d' "$((existing_count + 1))")
+  archive_path="$mem/loops/loop-${loop_num}.md"
+  printf '# Loop %s\n' "$loop_num" > "$archive_path"
+  link="- [Loop ${loop_num}](loops/loop-${loop_num}.md)"
+  awk -v l="$link" '/<!-- loop-archive-end -->/ { print l } { print }' \
+    "$mem/INDEX.md" > "$mem/INDEX.md.tmp" && mv "$mem/INDEX.md.tmp" "$mem/INDEX.md"
+)
+
+_assert "archival: sequential numbering (loop-002.md)" "yes" \
+  "$( [[ -f "$ARCTMP/.claude/memory/loops/loop-002.md" ]] && echo yes || echo no )"
+_assert "archival: INDEX.md has 2 loop links" "2" \
+  "$(grep -c '^\- \[Loop' "$ARCTMP/.claude/memory/INDEX.md")"
+
 echo ""
 echo "── Results ──────────────────────────────────────────────────"
 echo "  PASS: $PASS  FAIL: $FAIL"

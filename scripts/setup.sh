@@ -32,6 +32,7 @@ WITH_JUDGE=false
 WORKERS=2
 COMPLETION_PROMISE="COMPLETE"
 MILESTONE_EVERY=0
+STRUCTURED_MEMORY=false
 PROMPT_PARTS=()
 
 # ── Parse remaining args ──────────────────────────────────────────
@@ -44,6 +45,7 @@ while [[ $# -gt 0 ]]; do
     --workers|-w)            WORKERS="$2";             shift 2 ;;
     --completion-promise|-p) COMPLETION_PROMISE="$2";  shift 2 ;;
     --milestone-every|-m)    MILESTONE_EVERY="$2";     shift 2 ;;
+    --structured-memory)     STRUCTURED_MEMORY=true;    shift   ;;
     --help|-h)
       echo "Usage: setup.sh --mode basic|judge|autonomous|parallel [OPTIONS] PROMPT"
       echo "  --max-iterations N       Max iterations (default: 50/200 by mode)"
@@ -53,6 +55,7 @@ while [[ $# -gt 0 ]]; do
       echo "  --workers N              Parallel workers (default: 2)"
       echo "  --completion-promise TEXT  Completion signal (basic, default: COMPLETE)"
       echo "  --milestone-every N      Pause every N iterations for human review (default: 0=off)"
+      echo "  --structured-memory      Scaffold .claude/memory/ wiki on init (opt-in)"
       exit 0 ;;
     *) PROMPT_PARTS+=("$1"); shift ;;
   esac
@@ -105,8 +108,90 @@ _state() {
     [[ -n "$branch" ]]   && { echo "branch: $branch"; echo "base_branch: $BASE_BRANCH"; echo "merge_status: pending"; }
     [[ -n "$worktree" ]] && echo "worktree_path: $worktree"
     [[ "$MILESTONE_EVERY" -gt 0 ]] && echo "milestone_every: $MILESTONE_EVERY"
+    [[ "$STRUCTURED_MEMORY" == "true" ]] && echo "structured_memory: true"
     echo "---"; echo "$PROMPT"
   } > "$path"
+}
+
+# ── Helper: scaffold memory wiki ──────────────────────────────────
+_init_memory() {
+  local mem=".claude/memory"
+  [[ -d "$mem" ]] && return 0   # already scaffolded — do not overwrite
+  mkdir -p "$mem/loops" "$mem/decisions"
+
+  cat > "$mem/INDEX.md" << 'MDEOF'
+# Memory Wiki — Index
+
+Cross-iteration knowledge base. Agent-maintained; grows across loops.
+
+## Files
+- [spec.md](spec.md) — Goals and completion criteria (set in iter 1, rarely changes)
+- [map.md](map.md) — Codebase map (update as you explore)
+- [constraints.md](constraints.md) — Discovered constraints (append-only)
+- [decisions/](decisions/) — Per-topic technical decisions
+
+## Loop archive
+<!-- loop-archive-start -->
+<!-- loop-archive-end -->
+MDEOF
+
+  cat > "$mem/spec.md" << 'MDEOF'
+# Spec — Goals and Completion Criteria
+
+> Set in iteration 1. Update only if the goal itself changes.
+
+## Goal
+[Agent: restate the task in your own words — include implicit constraints]
+
+## Completion criteria
+- [ ] [Agent: list measurable acceptance criteria]
+
+## Out of scope
+- [Agent: explicit non-goals to prevent scope creep]
+MDEOF
+
+  cat > "$mem/map.md" << 'MDEOF'
+# Codebase Map
+
+> Agent-maintained. Update when you discover key files, modules, or patterns.
+> One line per entry. Keep it scannable.
+
+## Key files
+| Path | Role |
+|------|------|
+| (agent: add as discovered) | |
+
+## Architecture notes
+- (agent: add as discovered)
+
+## Test command
+(agent: fill in the exact command to run the full test suite)
+MDEOF
+
+  cat > "$mem/constraints.md" << 'MDEOF'
+# Discovered Constraints
+
+> Append-only. Never remove entries — strike through with ~~text~~ if outdated.
+> Format: [iter N] description
+
+MDEOF
+
+  cat > "$mem/loops/current.md" << 'MDEOF'
+# Current Loop Progress
+
+> Reset at loop start. Archived to loops/loop-NNN.md by _on_complete().
+
+## Completed this loop
+- (agent: append as tasks finish)
+
+## Key decisions
+- (agent: chose X over Y because Z)
+
+## Blockers / open questions
+- (agent: fill in)
+MDEOF
+
+  echo "[gulf-loop] Memory wiki scaffolded at $mem/" >&2
 }
 
 STATE_FILE=".claude/gulf-loop.local.md"
@@ -116,20 +201,24 @@ case "$MODE" in
 
   basic)
     _state "$STATE_FILE"
+    [[ "$STRUCTURED_MEMORY" == "true" ]] && _init_memory
     echo "[gulf-loop] Loop initialized."
     echo "  Iterations : 1 / $MAX_ITERATIONS max"
     echo "  Completion : <promise>${COMPLETION_PROMISE}</promise>"
     if [[ "$MILESTONE_EVERY" -gt 0 ]]; then echo "  Milestone  : every $MILESTONE_EVERY iterations"; fi
+    if [[ "$STRUCTURED_MEMORY" == "true" ]]; then echo "  Memory wiki: .claude/memory/"; fi
     ;;
 
   judge)
     JUDGE_MODEL=$(awk '/^---$/{c++;next} c==1&&/^model:/{sub(/^model:[[:space:]]*/,"");gsub(/"/,"");print;exit} c==2{exit}' RUBRIC.md)
     _state "$STATE_FILE" "" false true
+    [[ "$STRUCTURED_MEMORY" == "true" ]] && _init_memory
     echo "[gulf-loop] Judge mode initialized."
     echo "  Iterations     : 1 / $MAX_ITERATIONS max"
     echo "  Judge model    : ${JUDGE_MODEL:-claude-sonnet-4-6}"
     echo "  HITL threshold : $HITL_THRESHOLD consecutive rejections"
     if [[ "$MILESTONE_EVERY" -gt 0 ]]; then echo "  Milestone      : every $MILESTONE_EVERY iterations"; fi
+    if [[ "$STRUCTURED_MEMORY" == "true" ]]; then echo "  Memory wiki    : .claude/memory/"; fi
     ;;
 
   autonomous)
@@ -140,11 +229,13 @@ case "$MODE" in
     BRANCH="gulf/auto-${TIMESTAMP}"
     git checkout -b "$BRANCH"
     _state "$STATE_FILE" "$BRANCH" true "$WITH_JUDGE"
+    [[ "$STRUCTURED_MEMORY" == "true" ]] && _init_memory
     echo "[gulf-loop] Autonomous mode initialized."
     echo "  Branch     : $BRANCH → $BASE_BRANCH"
     echo "  Iterations : 1 / $MAX_ITERATIONS max"
     if [[ "$WITH_JUDGE" == "true" ]]; then echo "  Judge      : enabled (strategy reset at $HITL_THRESHOLD)"; fi
     if [[ "$MILESTONE_EVERY" -gt 0 ]]; then echo "  Milestone  : every $MILESTONE_EVERY iterations"; fi
+    if [[ "$STRUCTURED_MEMORY" == "true" ]]; then echo "  Memory wiki: .claude/memory/"; fi
     ;;
 
   parallel)
@@ -164,6 +255,9 @@ case "$MODE" in
       git worktree add "$WT" -b "$BRANCH"
       _state "$WT/.claude/gulf-loop.local.md" "$BRANCH" true "$WITH_JUDGE" "$WT"
       [[ "$WITH_JUDGE" == "true" && -f "RUBRIC.md" ]] && cp "RUBRIC.md" "$WT/RUBRIC.md"
+      if [[ "$STRUCTURED_MEMORY" == "true" ]]; then
+        (cd "$WT" && _init_memory)
+      fi
       WORKTREE_PATHS+=("$WT")
       echo "  Worker $i: $WT"
     done
@@ -174,6 +268,7 @@ case "$MODE" in
     done
     echo "Merges serialize to: $BASE_BRANCH"
     [[ "$MILESTONE_EVERY" -gt 0 ]] && echo "Milestone          : every $MILESTONE_EVERY iterations"
+    [[ "$STRUCTURED_MEMORY" == "true" ]] && echo "Memory wiki        : .claude/memory/ (per worktree)"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     ;;
 esac

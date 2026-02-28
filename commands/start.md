@@ -68,7 +68,9 @@ Think through each perspective independently. Give each real effort — don't sk
 
 > These perspectives may conflict. The synthesis should navigate the tension — preserve what the Defender values, address what the Critic flags, account for what the Scout identifies.
 
-### Step 3: Write `progress.txt`
+### Step 3: Write `progress.txt` (and `spec.md` if structured memory is enabled)
+
+If `.claude/memory/spec.md` exists, fill it in now — Goal, completion criteria, and out-of-scope. This is the only time spec.md should be written; treat it as immutable after iteration 1.
 
 ```
 ORIGINAL_GOAL: [restate the task in your own words — include implicit constraints]
@@ -102,6 +104,7 @@ From iteration 2 onward: read `progress.txt` (your research brief), then execute
 ```
 git log --oneline -10
 [test command]
+cat .claude/memory/INDEX.md 2>/dev/null    # structured memory: read index first, then follow links
 cat progress.txt 2>/dev/null
 ```
 

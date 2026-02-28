@@ -707,6 +707,55 @@ Loop 3:  /gulf-loop:start                      → 기능 B 구현 + 통합
 
 **분리 신호**: RUBRIC의 수락 기준이 8–10개 이상이거나, 반복 40회 이상이 예상되면 작업을 순차적 루프로 나눈다.
 
+### 구조화 메모리 위키 — 루프 간 지식 베이스
+
+어떤 시작 명령에든 `--structured-memory`를 전달하면 `.claude/memory/`에 영속적이고 주제별로 정리된 지식 베이스가 생성된다:
+
+```bash
+/gulf-loop:start "기능 구현" --structured-memory
+# 또는
+bash scripts/setup.sh --mode judge --structured-memory "$(cat PROMPT.md)"
+```
+
+다음 구조가 생성된다:
+
+```
+.claude/memory/
+├── INDEX.md           ← 마스터 인덱스; 루프 완료 시 stop hook이 자동 업데이트
+├── spec.md            ← 목표 + 완료 기준 (에이전트가 iteration 1에서 채움)
+├── map.md             ← 코드베이스 지도 (에이전트가 탐색하며 추가)
+├── constraints.md     ← 발견된 제약사항, 추가 전용
+├── decisions/         ← 주제별 결정 파일 (에이전트가 필요에 따라 생성)
+│   └── <topic>.md
+└── loops/
+    ├── current.md     ← 현재 루프 진행 상황 (에이전트 추가; 완료 시 리셋)
+    ├── loop-001.md    ← 완료된 루프 1 아카이브 (불변)
+    └── loop-002.md    ← 완료된 루프 2 아카이브 (불변)
+```
+
+**동작 방식:**
+
+| 이벤트 | 처리 |
+|--------|------|
+| 초기화 시 `--structured-memory` | 스캐폴드 생성; `structured_memory: true` 상태 파일에 기록 |
+| Iteration 1 (리서치 페이즈) | 에이전트가 `spec.md` 작성; `loops/current.md` 초기화 |
+| 각 반복 | 에이전트가 `loops/current.md`, `map.md`, `constraints.md` 추가; `decisions/<topic>.md` 생성 |
+| 루프 완료 | Stop hook이 `loops/current.md` → `loops/loop-NNN.md` 아카이브; `INDEX.md`에 링크 추가 |
+| 다음 루프 실행 | 에이전트가 `INDEX.md` 먼저 읽고 관련 파일 링크 따라가기 |
+
+**단일 플랫 파일 대비 장점:**
+
+| 플랫 파일의 문제 | 구조화 위키의 해결 |
+|----------------|------------------|
+| 위치 편향 — 최근 항목이 초기 항목보다 더 많이 반영됨 | `spec.md`는 항상 신선; decisions/는 시간 순서가 아닌 주제별 정리 |
+| 단일 파일이 무한 증가 → cold-start 비대화 | INDEX.md는 작게 유지; 주제별 파일에 관련 내용만 포함 |
+| 전부 읽거나 컨텍스트를 놓치거나 | 에이전트가 Phase 0에서 관련 링크만 따라감 |
+| 불변 이력 없음 | 완료된 루프가 타임스탬프와 함께 아카이브; 덮어쓰기 없음 |
+
+**사용 시기:** 여러 루프에 걸친 긴 작업, 트레이드오프 결정이 많은 리팩터 작업, 세션 간 동일 프로젝트를 진행하는 팀.
+
+**생략 시기:** `progress.txt` + `gulf-align.md`로 충분한 단일 루프 단기 작업.
+
 ---
 
 ## 10. 설치

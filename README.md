@@ -692,6 +692,55 @@ Each loop completion appends `progress.txt` to `gulf-align.md`, so later loops i
 
 **Split signal**: if your RUBRIC has > 8–10 acceptance criteria, or you anticipate > 40 iterations — break the task into sequential loops.
 
+### Structured memory wiki — cross-iteration knowledge base
+
+Pass `--structured-memory` to any start command to scaffold a persistent, topically organized knowledge base at `.claude/memory/`:
+
+```bash
+/gulf-loop:start "build the feature" --structured-memory
+# or
+bash scripts/setup.sh --mode judge --structured-memory "$(cat PROMPT.md)"
+```
+
+This creates:
+
+```
+.claude/memory/
+├── INDEX.md           ← master index; auto-updated by stop hook on completion
+├── spec.md            ← goals + completion criteria (agent fills in iteration 1)
+├── map.md             ← codebase map (agent appends as it explores)
+├── constraints.md     ← discovered constraints, append-only
+├── decisions/         ← per-topic decision files (agent creates as needed)
+│   └── <topic>.md
+└── loops/
+    ├── current.md     ← progress this loop (agent appends; reset on completion)
+    ├── loop-001.md    ← completed loop 1 archive (immutable)
+    └── loop-002.md    ← completed loop 2 archive (immutable)
+```
+
+**How it works:**
+
+| Event | What happens |
+|-------|-------------|
+| `--structured-memory` on init | Scaffold created; `structured_memory: true` written to state file |
+| Iteration 1 (research phase) | Agent fills in `spec.md`; initializes `loops/current.md` |
+| Each iteration | Agent appends to `loops/current.md`, `map.md`, `constraints.md`, creates `decisions/<topic>.md` |
+| Loop completion | Stop hook archives `loops/current.md` → `loops/loop-NNN.md`; inserts link in `INDEX.md` |
+| Next loop run | Agent reads `INDEX.md` first; follows links to relevant files |
+
+**Why this beats a single flat file:**
+
+| Problem with flat files | Structured wiki fix |
+|------------------------|---------------------|
+| Position bias — recent entries weighted more than early ones | `spec.md` is always fresh; decisions/ are topical, not chronological |
+| Single file grows unbounded → cold-start bloat | INDEX.md stays small; per-topic files contain only what's relevant |
+| All or nothing — read everything or miss context | Agent follows only relevant links in Phase 0 |
+| No immutable history | Completed loops archived with timestamps; never overwritten |
+
+**When to use:** long tasks spanning multiple loops, refactor work with many trade-off decisions, teams running the same project across sessions.
+
+**When to skip:** short single-loop tasks where `progress.txt` + `gulf-align.md` is sufficient.
+
 ---
 
 ## 10. Install
