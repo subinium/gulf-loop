@@ -128,6 +128,33 @@ if [[ -z "$(echo "$PROMPT" | tr -d '[:space:]')" ]]; then
   exit 0
 fi
 
+# ── 6b. Context hints — prepend REMAINING_GAP + progress.txt size warning ──
+# Surfaces the next task at the top of every re-inject so the agent doesn't
+# need to read progress.txt just to find what to do next.
+if [[ -f "progress.txt" && "$ITERATION" -gt 1 ]]; then
+  # Extract REMAINING_GAP content (handles both inline and bullet-list formats)
+  NEXT_TASK=$(awk '
+    /^REMAINING_GAP:/ { found=1; rest=substr($0,15); sub(/^[[:space:]]+/,"",rest); if (rest ~ /[^[:space:]]/) print rest; next }
+    found && /^[A-Z_]+:/ { exit }
+    found { print }
+  ' "progress.txt" 2>/dev/null | sed '/^[[:space:]]*$/d' | head -5)
+
+  # Warn if progress.txt is growing large (> 80 lines)
+  PT_LINES=$(wc -l < "progress.txt" | tr -d ' ')
+  PT_WARN=""
+  if [[ "$PT_LINES" -gt 80 ]]; then
+    PT_WARN=$(printf '\n> ⚠️ `progress.txt` is %s lines (>80). Keep future entries lean — summarize, do not append verbatim history.' "$PT_LINES")
+  fi
+
+  if [[ -n "$NEXT_TASK" || -n "$PT_WARN" ]]; then
+    CONTEXT_HEADER="## Next task (from progress.txt)"
+    [[ -n "$NEXT_TASK" ]] && CONTEXT_HEADER="${CONTEXT_HEADER}
+${NEXT_TASK}"
+    [[ -n "$PT_WARN" ]] && CONTEXT_HEADER="${CONTEXT_HEADER}${PT_WARN}"
+    PROMPT="$(printf '%s\n\n---\n\n%s' "$CONTEXT_HEADER" "$PROMPT")"
+  fi
+fi
+
 # ── Helper: update a frontmatter field in-place ───────────────────
 _update_field() {
   local field="$1" value="$2"
@@ -205,15 +232,26 @@ MDEOF
     echo "[gulf-loop] Memory loop archived to $archive_path" >&2
   fi
 
-  # ── gulf-align.md handoff ─────────────────────────────────────────
+  # ── gulf-align.md handoff (distilled — key sections only) ────────
+  # Appends ORIGINAL_GOAL + DECISIONS + REMAINING_GAP + CONFIDENCE only.
+  # Full progress.txt is archived in loops/loop-NNN.md (structured memory)
+  # or remains on disk. Keeping gulf-align.md lean prevents context bloat
+  # across multiple loop runs.
   if [[ -f "progress.txt" ]]; then
     mkdir -p ".claude"
     {
       printf '\n## Loop completed — %s | iteration %s\n\n' \
         "$(date '+%Y-%m-%d %H:%M:%S')" "$ITERATION"
-      cat "progress.txt"
+      awk '
+        /^ORIGINAL_GOAL:/  { print; next }
+        /^DECISIONS:/      { f=1; print; next }
+        /^REMAINING_GAP:/  { f=1; print; next }
+        /^CONFIDENCE:/     { f=0; print; next }
+        /^[A-Z_]+:/        { f=0; next }
+        f                  { print }
+      ' "progress.txt"
     } >> ".claude/gulf-align.md"
-    echo "[gulf-loop] Loop summary appended to .claude/gulf-align.md." >&2
+    echo "[gulf-loop] Loop summary (distilled) appended to .claude/gulf-align.md." >&2
   fi
   rm -f "$STATE_FILE"
 }

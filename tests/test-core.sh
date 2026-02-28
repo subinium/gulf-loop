@@ -519,6 +519,123 @@ _assert "evolution: 2 entries total"          "2" \
 _assert "evolution: empty META not appended"  "2" \
   "$(wc -l < "$EVTMP/JUDGE_EVOLUTION.md" | tr -d ' ')"
 
+# ── Group 11: REMAINING_GAP injection ─────────────────────────────
+echo "── REMAINING_GAP: context injection ────────────────────────"
+
+RGTMP2=$(mktemp -d)
+trap 'rm -rf "$RGTMP2"' EXIT
+
+# Helper: mirrors stop-hook.sh REMAINING_GAP extraction logic
+_extract_remaining_gap() {
+  local pf="$1"
+  awk '
+    /^REMAINING_GAP:/ { found=1; rest=substr($0,15); sub(/^[[:space:]]+/,"",rest); if (rest ~ /[^[:space:]]/) print rest; next }
+    found && /^[A-Z_]+:/ { exit }
+    found { print }
+  ' "$pf" 2>/dev/null | sed '/^[[:space:]]*$/d' | head -5
+}
+
+# Inline value: REMAINING_GAP: implement auth module
+cat > "$RGTMP2/p_inline.txt" << 'EOF'
+ORIGINAL_GOAL: test
+ITERATION: 3
+REMAINING_GAP: implement auth module
+CONFIDENCE: 70
+EOF
+_assert "remaining_gap: inline value extracted" \
+  "implement auth module" "$(_extract_remaining_gap "$RGTMP2/p_inline.txt")"
+
+# Bullet list format
+cat > "$RGTMP2/p_bullet.txt" << 'EOF'
+ORIGINAL_GOAL: test
+ITERATION: 3
+REMAINING_GAP:
+- implement auth module
+- add tests
+CONFIDENCE: 70
+EOF
+EXTRACTED=$(  _extract_remaining_gap "$RGTMP2/p_bullet.txt")
+_assert "remaining_gap: bullet list — first item" \
+  "- implement auth module" "$(echo "$EXTRACTED" | head -1)"
+_assert "remaining_gap: bullet list — second item" \
+  "- add tests" "$(echo "$EXTRACTED" | tail -1)"
+
+# No REMAINING_GAP field — should return empty
+cat > "$RGTMP2/p_none.txt" << 'EOF'
+ORIGINAL_GOAL: test
+ITERATION: 3
+CONFIDENCE: 70
+EOF
+_assert "remaining_gap: missing field returns empty" \
+  "" "$(_extract_remaining_gap "$RGTMP2/p_none.txt")"
+
+# progress.txt line count warning threshold
+_pt_warn() {
+  local lines="$1"
+  if [[ "$lines" -gt 80 ]]; then
+    echo "warn"
+  else
+    echo "ok"
+  fi
+}
+_assert "progress.txt: 80 lines — no warning" "ok"   "$(_pt_warn 80)"
+_assert "progress.txt: 81 lines — warn"       "warn" "$(_pt_warn 81)"
+_assert "progress.txt: 150 lines — warn"      "warn" "$(_pt_warn 150)"
+
+# ── Group 12: gulf-align.md distillation ──────────────────────────
+echo "── gulf-align.md: distillation ──────────────────────────────"
+
+GDTMP=$(mktemp -d)
+trap 'rm -rf "$GDTMP"' EXIT
+
+# Helper: mirrors stop-hook.sh gulf-align distillation awk
+_distill() {
+  local pf="$1"
+  awk '
+    /^ORIGINAL_GOAL:/  { print; next }
+    /^DECISIONS:/      { f=1; print; next }
+    /^REMAINING_GAP:/  { f=1; print; next }
+    /^CONFIDENCE:/     { f=0; print; next }
+    /^[A-Z_]+:/        { f=0; next }
+    f                  { print }
+  ' "$pf"
+}
+
+cat > "$GDTMP/progress.txt" << 'EOF'
+ORIGINAL_GOAL: refactor auth module
+ITERATION: 5
+COMPLETED:
+- implemented JWT (confidence: 90)
+DECISIONS:
+- chose: argon2id, rejected: bcrypt, reason: password shucking risk
+UNCERTAINTIES:
+- rate limiting edge cases not verified
+REMAINING_GAP:
+- add refresh token rotation
+CONFIDENCE: 75
+EOF
+
+DISTILLED=$(_distill "$GDTMP/progress.txt")
+
+_assert "distill: ORIGINAL_GOAL included" \
+  "1" "$(echo "$DISTILLED" | grep -c "^ORIGINAL_GOAL:")"
+_assert "distill: DECISIONS section included" \
+  "1" "$(echo "$DISTILLED" | grep -c "^DECISIONS:")"
+_assert "distill: DECISIONS content included" \
+  "1" "$(echo "$DISTILLED" | grep -c "argon2id")"
+_assert "distill: REMAINING_GAP included" \
+  "1" "$(echo "$DISTILLED" | grep -c "^REMAINING_GAP:")"
+_assert "distill: REMAINING_GAP content included" \
+  "1" "$(echo "$DISTILLED" | grep -c "refresh token")"
+_assert "distill: CONFIDENCE included" \
+  "1" "$(echo "$DISTILLED" | grep -c "^CONFIDENCE:")"
+_assert "distill: COMPLETED excluded" \
+  "0" "$(echo "$DISTILLED" | grep -c "^COMPLETED:" || true)"
+_assert "distill: COMPLETED content excluded" \
+  "0" "$(echo "$DISTILLED" | grep -c "implemented JWT" || true)"
+_assert "distill: UNCERTAINTIES excluded" \
+  "0" "$(echo "$DISTILLED" | grep -c "^UNCERTAINTIES:" || true)"
+
 echo ""
 echo "── Results ──────────────────────────────────────────────────"
 echo "  PASS: $PASS  FAIL: $FAIL"
