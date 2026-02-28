@@ -585,6 +585,18 @@ Sycophancy Loop를 끊는 메커니즘이다. 같은 방향의 변형을 반복�
 
 ## 9. 최근 추가 기능
 
+### `--force-max` — 항상 최대 반복 횟수까지 실행
+
+기본적으로 루프는 완료 신호가 출력되는 순간(또는 judge가 승인하는 순간) 종료된다. `--force-max`를 사용하면 신호를 인식하되 `max_iterations`에 도달할 때까지 계속 실행된다.
+
+```bash
+/gulf-loop:start "auth 모듈 리팩터" --max-iterations 10 --force-max
+```
+
+이미 완료 신뢰도가 높아도 계속 개선하도록 강제할 때 유용하다. 루프는 max-iterations 게이트에서 정상 종료된다.
+
+judge 모드에서는 judge 승인 시 `consecutive_rejections`를 0으로 초기화하고 반복을 계속한다.
+
 ### `milestone_every` — 선제적 체크포인트
 
 judge 결과와 무관하게 N번마다 루프를 일시정지해 사람이 검토할 수 있다.
@@ -911,10 +923,10 @@ your-project/
 | 명령어 | 설명 |
 |--------|------|
 | `/gulf-loop:align` | **루프 시작 전 먼저 실행** — 예지·실행·평가 갭을 표면화, `gulf-align.md` 저장 |
-| `/gulf-loop:start PROMPT [--max-iterations N] [--completion-promise TEXT] [--milestone-every N]` | 기본 루프 |
-| `/gulf-loop:start-with-judge PROMPT [--max-iterations N] [--hitl-threshold N] [--milestone-every N]` | Judge 포함 루프 |
-| `/gulf-loop:start-autonomous PROMPT [--max-iterations N] [--base-branch BRANCH] [--with-judge] [--hitl-threshold N] [--milestone-every N]` | 자율 루프 (HITL 없음) |
-| `/gulf-loop:start-parallel PROMPT --workers N [--max-iterations N] [--base-branch BRANCH] [--with-judge] [--milestone-every N]` | 병렬 worktree 루프 |
+| `/gulf-loop:start PROMPT [--max-iterations N] [--completion-promise TEXT] [--milestone-every N] [--force-max]` | 기본 루프 |
+| `/gulf-loop:start-with-judge PROMPT [--max-iterations N] [--hitl-threshold N] [--milestone-every N] [--force-max]` | Judge 포함 루프 |
+| `/gulf-loop:start-autonomous PROMPT [--max-iterations N] [--base-branch BRANCH] [--with-judge] [--hitl-threshold N] [--milestone-every N] [--force-max]` | 자율 루프 (HITL 없음) |
+| `/gulf-loop:start-parallel PROMPT --workers N [--max-iterations N] [--base-branch BRANCH] [--with-judge] [--milestone-every N] [--force-max]` | 병렬 worktree 루프 |
 | `/gulf-loop:status` | 현재 반복 횟수 확인 |
 | `/gulf-loop:cancel` | 루프 중단 |
 | `/gulf-loop:resume` | HITL 일시정지 후 재개 / 사전 초기화된 worktree 시작 |

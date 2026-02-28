@@ -570,6 +570,18 @@ This is the mechanism for breaking out of the Sycophancy Loop. Instead of repeat
 
 ## 9. Recent Additions
 
+### `--force-max` — always run to max iterations
+
+By default, the loop ends as soon as the completion signal is output (or judge approves). `--force-max` overrides this: the loop acknowledges the signal but keeps running until `max_iterations` is reached.
+
+```bash
+/gulf-loop:start "refactor the auth module" --max-iterations 10 --force-max
+```
+
+Useful when you want exhaustive refinement — the agent continues improving even after it's confident the task is done. The loop exits cleanly at max iterations via the normal max-iterations gate.
+
+In judge mode, a judge approval with `--force-max` resets `consecutive_rejections` to 0 and continues iterating.
+
 ### `milestone_every` — proactive HITL checkpoints
 
 Pause the loop every N iterations for human review, independent of judge outcomes.
@@ -909,10 +921,10 @@ Then open each printed worktree path in a separate Claude Code session and run `
 | Command | Description |
 |---------|-------------|
 | `/gulf-loop:align` | **Run before starting** — surfaces envisioning/execution/evaluation gaps, saves `gulf-align.md` |
-| `/gulf-loop:start PROMPT [--max-iterations N] [--completion-promise TEXT] [--milestone-every N]` | Basic loop |
-| `/gulf-loop:start-with-judge PROMPT [--max-iterations N] [--hitl-threshold N] [--milestone-every N]` | Loop with judge |
-| `/gulf-loop:start-autonomous PROMPT [--max-iterations N] [--base-branch BRANCH] [--with-judge] [--hitl-threshold N] [--milestone-every N]` | Autonomous loop (no HITL) |
-| `/gulf-loop:start-parallel PROMPT --workers N [--max-iterations N] [--base-branch BRANCH] [--with-judge] [--milestone-every N]` | Parallel worktree loops |
+| `/gulf-loop:start PROMPT [--max-iterations N] [--completion-promise TEXT] [--milestone-every N] [--force-max]` | Basic loop |
+| `/gulf-loop:start-with-judge PROMPT [--max-iterations N] [--hitl-threshold N] [--milestone-every N] [--force-max]` | Loop with judge |
+| `/gulf-loop:start-autonomous PROMPT [--max-iterations N] [--base-branch BRANCH] [--with-judge] [--hitl-threshold N] [--milestone-every N] [--force-max]` | Autonomous loop (no HITL) |
+| `/gulf-loop:start-parallel PROMPT --workers N [--max-iterations N] [--base-branch BRANCH] [--with-judge] [--milestone-every N] [--force-max]` | Parallel worktree loops |
 | `/gulf-loop:status` | Current iteration count |
 | `/gulf-loop:cancel` | Stop the loop |
 | `/gulf-loop:resume` | Resume after HITL pause (or start pre-initialized worktree) |
