@@ -213,7 +213,7 @@ Both are **judgments that cannot be automated**. The HITL gate triggering is nor
 
 ### Principle 3: Define "done" before you start
 
-Implicit completion criteria are the cause of evaluation gaps. RUBRIC.md defines this in three layers:
+Implicit completion criteria are the cause of evaluation gaps. RUBRIC.md defines this in two layers:
 
 - **Checks**: shell commands that serve a dual role — fast gate (any fail → no Opus call, loop re-injects immediately) and LLM behavioral evidence (output fed to judge when all pass)
 - **Judge criteria**: natural-language requirements the LLM evaluates against check output + source files
@@ -528,13 +528,15 @@ This is the mechanism for breaking out of the Sycophancy Loop. Instead of repeat
 
 ---
 
-## 9. What's Not Yet Implemented
+## 9. Recent Additions
 
 ### `milestone_every` — proactive HITL checkpoints
 
-The current HITL gate is **reactive** — it triggers only after evaluation fails N times.
+Pause the loop every N iterations for human review, independent of judge outcomes.
 
-A proactive checkpoint would pause the loop at regular intervals for human evaluation, independent of judge outcomes.
+```bash
+/gulf-loop:start-with-judge "$(cat PROMPT.md)" --milestone-every 5
+```
 
 ```yaml
 ---
@@ -544,32 +546,32 @@ milestone_every: 5        # pause every 5 iterations for human review
 ---
 ```
 
-At iterations 5, 10, 15: loop pauses, shows progress summary, waits for `/gulf-loop:resume`.
+At iterations 5, 10, 15: loop sets `active: false` and exits. Review `progress.txt`, then run `/gulf-loop:resume` to continue.
 
-### `EXECUTION_LOG.md` — epistemic handoff
+### Enhanced `progress.txt` — epistemic handoff
 
-A convention where the agent writes its understanding of the remaining execution gap after each iteration — not just a todo list, but reasoning traces and uncertainties:
+The structured `progress.txt` format now includes decision rationale and uncertainties:
 
-```yaml
-## Iteration 4
-completed:
-  - task: user creation endpoint
-    confidence: 0.9
-    reasoning: "reused existing validator.ts"
+```
+ORIGINAL_GOAL: [from gulf-align.md or RUBRIC]
+ITERATION: [N]
 
-decisions:
-  - chose: argon2id
-    rejected: bcrypt
-    reason: "72-byte limit"
-    revisit_if: "legacy system compatibility required"
+COMPLETED:
+- [task — what, why, confidence 0-100]
 
-uncertainties:
-  - "rate limiting edge cases not yet verified"
+DECISIONS:
+- chose: [X], rejected: [Y], reason: [why], revisit_if: [condition]
 
-next: password hashing
+UNCERTAINTIES:
+- [what you're not sure about]
+
+REMAINING_GAP:
+- [next task]
+
+CONFIDENCE: [0-100]
 ```
 
-The current progress.txt is a free-form log. This format would let the next iteration's agent structurally inherit the previous agent's decision rationale — not just conclusions, but the reasoning path.
+This passes decision rationale to the next iteration — not just conclusions, but the reasoning path. Replaces the previously planned `EXECUTION_LOG.md`.
 
 ---
 

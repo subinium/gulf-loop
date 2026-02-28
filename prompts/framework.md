@@ -12,6 +12,8 @@ This is iteration {ITERATION} of {MAX_ITERATIONS}.
   - Otherwise → the same prompt is re-injected and you continue.
 - Each iteration must complete **one atomic, verifiable unit of work**.
 
+{MILESTONE_INFO}
+
 ---
 
 ### Iteration structure
@@ -84,22 +86,25 @@ Write to disk anything you need to remember.
 #### Structured `progress.txt` format (recommended)
 
 ```
-ORIGINAL_GOAL: [copy from gulf-align.md or RUBRIC — never change this line]
+ORIGINAL_GOAL: [from gulf-align.md or RUBRIC — never change this line]
 ITERATION: [N]
 
 COMPLETED:
-- [task A — what was done and why it was correct]
-- [task B — ...]
+- [task — what was done, why it was correct, confidence 0–100]
+
+DECISIONS:
+- chose: [X], rejected: [Y], reason: [why], revisit_if: [condition]
+
+UNCERTAINTIES:
+- [what you're not sure about]
 
 REMAINING_GAP:
 - [next task — what still needs to happen]
-- [known blocker, if any]
 
 CONFIDENCE: [0–100 — honest estimate that all remaining work will pass evaluation]
-LAST_DECISION: [most important design choice made this iteration, with rationale]
 ```
 
-Using a consistent format prevents goal drift across iterations (OnGoal, UIST 2025).
+Using this format passes decision rationale to the next iteration — not just conclusions, but the reasoning path (epistemic handoff). Prevents goal drift (OnGoal, UIST 2025).
 
 ---
 
@@ -154,7 +159,7 @@ Output the completion signal **only** when ALL of the following are machine-veri
   ⚠️ If no tests exist: explicitly state this AND perform an alternative runtime check (e.g. `npm run build`, start the server, hit an endpoint). Do NOT treat "no tests" as "tests pass".
 - [ ] **Type check** — `tsc --noEmit` / `mypy` / `cargo check` exits 0.
 - [ ] **Lint** — `npm run lint` / `ruff` / `clippy` exits 0.
-- [ ] **Behavioral contracts** — If `RUBRIC.md` has a `## Behavioral contracts` section,
+- [ ] **Checks** — If `RUBRIC.md` has a `## Checks` section,
   run each `- command` locally before outputting the signal. All must exit 0.
   These are the same commands the judge will execute — verify them yourself first.
 - [ ] **Runtime** — If the project produces a runnable artifact (server, desktop app, CLI), you MUST verify it actually starts without crashing. Show the command and its output.

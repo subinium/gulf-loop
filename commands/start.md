@@ -1,6 +1,6 @@
 ---
 description: "Start a Gulf Loop — autonomous iterative development until the completion promise is output"
-argument-hint: "PROMPT [--max-iterations N] [--completion-promise TEXT]"
+argument-hint: "PROMPT [--max-iterations N] [--completion-promise TEXT] [--milestone-every N]"
 allowed-tools: ["Bash(${CLAUDE_PLUGIN_ROOT}/scripts/setup.sh:*)"]
 hide-from-slash-command-tool: "true"
 ---

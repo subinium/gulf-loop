@@ -31,6 +31,7 @@ BASE_BRANCH=""
 WITH_JUDGE=false
 WORKERS=2
 COMPLETION_PROMISE="COMPLETE"
+MILESTONE_EVERY=0
 PROMPT_PARTS=()
 
 # ── Parse remaining args ──────────────────────────────────────────
@@ -42,6 +43,7 @@ while [[ $# -gt 0 ]]; do
     --hitl-threshold|-t)     HITL_THRESHOLD="$2";      shift 2 ;;
     --workers|-w)            WORKERS="$2";             shift 2 ;;
     --completion-promise|-p) COMPLETION_PROMISE="$2";  shift 2 ;;
+    --milestone-every|-m)    MILESTONE_EVERY="$2";     shift 2 ;;
     --help|-h)
       echo "Usage: setup.sh --mode basic|judge|autonomous|parallel [OPTIONS] PROMPT"
       echo "  --max-iterations N       Max iterations (default: 50/200 by mode)"
@@ -50,6 +52,7 @@ while [[ $# -gt 0 ]]; do
       echo "  --hitl-threshold N       Rejections before HITL/reset (default: 5/10)"
       echo "  --workers N              Parallel workers (default: 2)"
       echo "  --completion-promise TEXT  Completion signal (basic, default: COMPLETE)"
+      echo "  --milestone-every N      Pause every N iterations for human review (default: 0=off)"
       exit 0 ;;
     *) PROMPT_PARTS+=("$1"); shift ;;
   esac
@@ -57,7 +60,8 @@ done
 
 # ── Validate ──────────────────────────────────────────────────────
 [[ "$MAX_ITERATIONS" =~ ^[0-9]+$ ]] || { echo "ERROR: --max-iterations must be integer" >&2; exit 1; }
-[[ "$HITL_THRESHOLD" =~ ^[0-9]+$ ]] || { echo "ERROR: --hitl-threshold must be integer" >&2; exit 1; }
+[[ "$HITL_THRESHOLD" =~ ^[0-9]+$ ]]   || { echo "ERROR: --hitl-threshold must be integer" >&2; exit 1; }
+[[ "$MILESTONE_EVERY" =~ ^[0-9]+$ ]] || { echo "ERROR: --milestone-every must be a non-negative integer" >&2; exit 1; }
 if [[ "$MODE" == "parallel" ]]; then
   [[ "$WORKERS" =~ ^[0-9]+$ && "$WORKERS" -ge 1 ]] || { echo "ERROR: --workers must be a positive integer" >&2; exit 1; }
 fi
@@ -96,6 +100,7 @@ _state() {
     fi
     [[ -n "$branch" ]]   && { echo "branch: $branch"; echo "base_branch: $BASE_BRANCH"; echo "merge_status: pending"; }
     [[ -n "$worktree" ]] && echo "worktree_path: $worktree"
+    [[ "$MILESTONE_EVERY" -gt 0 ]] && echo "milestone_every: $MILESTONE_EVERY"
     echo "---"; echo "$PROMPT"
   } > "$path"
 }
@@ -110,6 +115,7 @@ case "$MODE" in
     echo "[gulf-loop] Loop initialized."
     echo "  Iterations : 1 / $MAX_ITERATIONS max"
     echo "  Completion : <promise>${COMPLETION_PROMISE}</promise>"
+    [[ "$MILESTONE_EVERY" -gt 0 ]] && echo "  Milestone  : every $MILESTONE_EVERY iterations"
     ;;
 
   judge)
@@ -119,6 +125,7 @@ case "$MODE" in
     echo "  Iterations     : 1 / $MAX_ITERATIONS max"
     echo "  Judge model    : ${JUDGE_MODEL:-claude-opus-4-6}"
     echo "  HITL threshold : $HITL_THRESHOLD consecutive rejections"
+    [[ "$MILESTONE_EVERY" -gt 0 ]] && echo "  Milestone      : every $MILESTONE_EVERY iterations"
     ;;
 
   autonomous)
@@ -133,6 +140,7 @@ case "$MODE" in
     echo "  Branch     : $BRANCH → $BASE_BRANCH"
     echo "  Iterations : 1 / $MAX_ITERATIONS max"
     [[ "$WITH_JUDGE" == "true" ]] && echo "  Judge      : enabled (strategy reset at $HITL_THRESHOLD)"
+    [[ "$MILESTONE_EVERY" -gt 0 ]] && echo "  Milestone  : every $MILESTONE_EVERY iterations"
     ;;
 
   parallel)

@@ -1,6 +1,6 @@
 ---
 description: "Start a Gulf Loop with LLM Judge — completes only when checks pass AND Claude Opus approves"
-argument-hint: "PROMPT [--max-iterations N] [--hitl-threshold N]"
+argument-hint: "PROMPT [--max-iterations N] [--hitl-threshold N] [--milestone-every N]"
 allowed-tools: ["Bash(${CLAUDE_PLUGIN_ROOT}/scripts/setup.sh:*)"]
 hide-from-slash-command-tool: "true"
 ---

@@ -63,12 +63,15 @@ ACTIVE=$(_field "active" "true")
 AUTONOMOUS=$(_field "autonomous" "false")
 BRANCH=$(_field "branch" "")
 BASE_BRANCH=$(_field "base_branch" "main")
+MILESTONE_EVERY=$(_field "milestone_every" "0")
+WORKTREE_PATH=$(_field "worktree_path" "")
 
 # Validate numerics
 [[ "$ITERATION" =~ ^[0-9]+$ ]]       || ITERATION=1
 [[ "$MAX_ITERATIONS" =~ ^[0-9]+$ ]]  || MAX_ITERATIONS=50
 [[ "$CONSECUTIVE_REJ" =~ ^[0-9]+$ ]] || CONSECUTIVE_REJ=0
 [[ "$HITL_THRESHOLD" =~ ^[0-9]+$ ]]  || HITL_THRESHOLD=5
+[[ "$MILESTONE_EVERY" =~ ^[0-9]+$ ]] || MILESTONE_EVERY=0
 
 # ── 4. HITL pause check ───────────────────────────────────────────
 if [[ "$ACTIVE" == "false" ]]; then
@@ -100,6 +103,14 @@ FRAMEWORK="${FRAMEWORK//\{MAX_ITERATIONS\}/$MAX_ITERATIONS}"
 FRAMEWORK="${FRAMEWORK//\{COMPLETION_PROMISE\}/$COMPLETION_PROMISE}"
 FRAMEWORK="${FRAMEWORK//\{BRANCH\}/$BRANCH}"
 FRAMEWORK="${FRAMEWORK//\{BASE_BRANCH\}/$BASE_BRANCH}"
+if [[ "$MILESTONE_EVERY" -gt 0 ]]; then
+  _NEXT_ITER=$(( ITERATION + 1 ))
+  _NEXT_MILESTONE=$(( (_NEXT_ITER + MILESTONE_EVERY - 1) / MILESTONE_EVERY * MILESTONE_EVERY ))
+  MILESTONE_INFO="**Milestone mode**: loop pauses every $MILESTONE_EVERY iterations for human review. Next pause: iteration $_NEXT_MILESTONE."
+else
+  MILESTONE_INFO=""
+fi
+FRAMEWORK="${FRAMEWORK//\{MILESTONE_INFO\}/$MILESTONE_INFO}"
 
 if [[ -z "$(echo "$PROMPT" | tr -d '[:space:]')" ]]; then
   echo "[gulf-loop] ERROR: Empty prompt body in $STATE_FILE. Stopping." >&2
@@ -213,6 +224,14 @@ _try_merge() {
     git branch -d "$BRANCH" 2>/dev/null || true
   fi
 
+  # Cleanup worktree after successful merge
+  if [[ "$IN_WORKTREE" == "true" ]]; then
+    local WT_PATH
+    WT_PATH=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+    git -C "$MAIN_REPO" worktree remove --force "$WT_PATH" 2>/dev/null || true
+    git -C "$MAIN_REPO" branch -d "$BRANCH" 2>/dev/null || true
+  fi
+
   flock -u 9
   echo "[gulf-loop] Autonomous: merged $BRANCH → $BASE_BRANCH successfully." >&2
   rm -f "$STATE_FILE"
@@ -221,6 +240,14 @@ _try_merge() {
 
 # ── 7. Increment iteration ────────────────────────────────────────
 NEXT=$((ITERATION + 1))
+
+# ── Milestone pause check ─────────────────────────────────────────
+if [[ "$MILESTONE_EVERY" -gt 0 && "$ITERATION" -gt 0 && $((ITERATION % MILESTONE_EVERY)) -eq 0 ]]; then
+  echo "[gulf-loop] Milestone: iteration $ITERATION (every $MILESTONE_EVERY). Pausing for review." >&2
+  echo "  Review progress.txt, then /gulf-loop:resume to continue." >&2
+  _update_field "active" "false"
+  exit 0
+fi
 
 # ── 8. Branch: JUDGE MODE vs NORMAL MODE ─────────────────────────
 

@@ -1,6 +1,6 @@
 ---
 description: "Set up N parallel autonomous Gulf Loops in separate git worktrees — each merges independently"
-argument-hint: "PROMPT --workers N [--max-iterations N] [--base-branch BRANCH] [--with-judge]"
+argument-hint: "PROMPT --workers N [--max-iterations N] [--base-branch BRANCH] [--with-judge] [--milestone-every N]"
 allowed-tools: ["Bash(${CLAUDE_PLUGIN_ROOT}/scripts/setup.sh:*)"]
 hide-from-slash-command-tool: "true"
 ---
