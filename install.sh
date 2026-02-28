@@ -83,15 +83,11 @@ install_files() {
   step "Copying plugin files..."
 
   mkdir -p "$INSTALL_DIR"
-  # Copy everything except install.sh itself, .git, README
-  rsync -a --exclude='install.sh' \
-            --exclude='.git' \
-            --exclude='.gitignore' \
-            --exclude='README.md' \
-            --exclude='RUBRIC.example.md' \
-            "${SOURCE_DIR}/" "${INSTALL_DIR}/"
+  cp -r "${SOURCE_DIR}/hooks"          "${INSTALL_DIR}/"
+  cp -r "${SOURCE_DIR}/scripts"        "${INSTALL_DIR}/"
+  cp -r "${SOURCE_DIR}/prompts"        "${INSTALL_DIR}/"
+  cp -r "${SOURCE_DIR}/.claude-plugin" "${INSTALL_DIR}/"
 
-  # Ensure scripts are executable
   chmod +x "${INSTALL_DIR}/hooks/stop-hook.sh"
   chmod +x "${INSTALL_DIR}/scripts/"*.sh
 
@@ -104,47 +100,14 @@ install_commands() {
 
   mkdir -p "$COMMANDS_DIR"
 
-  # Generate command files with the actual install path baked in
-  _write_command "gulf-loop:start" \
-    "Start a Gulf Loop — autonomous iterative development until the completion promise is output" \
-    "PROMPT [--max-iterations N] [--completion-promise TEXT]" \
-    "setup.sh" "--mode basic"
-
-  _write_command "gulf-loop:start-with-judge" \
-    "Start a Gulf Loop with LLM Judge — completes only when checks pass AND Claude Opus approves" \
-    "PROMPT [--max-iterations N] [--hitl-threshold N]" \
-    "setup.sh" "--mode judge"
-
-  _write_command "gulf-loop:start-autonomous" \
-    "Start a fully autonomous Gulf Loop — no HITL, branch-based, auto-merges on completion" \
-    "PROMPT [--max-iterations N] [--base-branch BRANCH] [--with-judge] [--hitl-threshold N]" \
-    "setup.sh" "--mode autonomous"
-
-  _write_command "gulf-loop:start-parallel" \
-    "Set up N parallel autonomous Gulf Loops in separate git worktrees" \
-    "PROMPT --workers N [--max-iterations N] [--base-branch BRANCH] [--with-judge]" \
-    "setup.sh" "--mode parallel"
-
-  # align command — needs Read + Write in addition to Bash
-  cat > "${COMMANDS_DIR}/gulf-loop:align.md" <<CMDEOF
----
-description: "Run Gulf Alignment — surface envisioning/execution/evaluation gaps before starting the loop"
-argument-hint: "[RUBRIC.md path]"
-allowed-tools: ["Bash(${INSTALL_DIR}/scripts/run-align.sh:*)", "Read", "Write"]
-hide-from-slash-command-tool: "true"
----
-
-CMDEOF
-  awk '/^---$/{c++;next} c>=2{print}' \
-    "${SOURCE_DIR}/commands/align.md" \
-    >> "${COMMANDS_DIR}/gulf-loop:align.md" 2>/dev/null || true
-  local tmp; tmp=$(mktemp)
-  sed "s|\${CLAUDE_PLUGIN_ROOT}|${INSTALL_DIR}|g" "${COMMANDS_DIR}/gulf-loop:align.md" > "$tmp" \
-    && mv "$tmp" "${COMMANDS_DIR}/gulf-loop:align.md"
-
-  _write_simple_command "gulf-loop:cancel"  "Cancel the active Gulf Loop"                              "cancel-loop.sh"
-  _write_simple_command "gulf-loop:status"  "Show current Gulf Loop iteration status"                  "status-loop.sh"
-  _write_simple_command "gulf-loop:resume"  "Resume a Gulf Loop paused by the HITL gate"              "resume-loop.sh"
+  # Each command: copy source file and substitute ${CLAUDE_PLUGIN_ROOT} with install path.
+  # commands/*.md is the single source of truth for descriptions and argument-hints.
+  local cmd
+  for cmd in start start-with-judge start-autonomous start-parallel align cancel status resume; do
+    sed "s|\${CLAUDE_PLUGIN_ROOT}|${INSTALL_DIR}|g" \
+      "${SOURCE_DIR}/commands/${cmd}.md" \
+      > "${COMMANDS_DIR}/gulf-loop:${cmd}.md"
+  done
 
   ok "8 slash commands → $COMMANDS_DIR"
   echo "    /gulf-loop:align  ← run before start (surfaces gaps)"
@@ -155,49 +118,6 @@ CMDEOF
   echo "    /gulf-loop:cancel"
   echo "    /gulf-loop:status"
   echo "    /gulf-loop:resume"
-}
-
-_write_command() {
-  local name="$1" desc="$2" hint="$3" script="$4" mode_arg="${5:-}"
-  local src_name="${name#gulf-loop:}"
-
-  # Write frontmatter
-  cat > "${COMMANDS_DIR}/${name}.md" <<EOF
----
-description: "${desc}"
-argument-hint: "${hint}"
-allowed-tools: ["Bash(${INSTALL_DIR}/scripts/${script}:*)"]
-hide-from-slash-command-tool: "true"
----
-
-EOF
-
-  # Append body from source command file (strip YAML frontmatter block)
-  awk '/^---$/{c++;next} c>=2{print}' \
-    "${SOURCE_DIR}/commands/${src_name}.md" \
-    >> "${COMMANDS_DIR}/${name}.md" 2>/dev/null || true
-
-  # Replace ${CLAUDE_PLUGIN_ROOT} references with actual install path
-  local tmp
-  tmp=$(mktemp)
-  sed "s|\${CLAUDE_PLUGIN_ROOT}|${INSTALL_DIR}|g" "${COMMANDS_DIR}/${name}.md" > "$tmp" \
-    && mv "$tmp" "${COMMANDS_DIR}/${name}.md"
-}
-
-_write_simple_command() {
-  local name="$1" desc="$2" script="$3"
-
-  cat > "${COMMANDS_DIR}/${name}.md" <<EOF
----
-description: "${desc}"
-allowed-tools: ["Bash(${INSTALL_DIR}/scripts/${script}:*)"]
-hide-from-slash-command-tool: "true"
----
-
-\`\`\`!
-${INSTALL_DIR}/scripts/${script}
-\`\`\`
-EOF
 }
 
 # ── Register Stop hook in settings.json ───────────────────────────
