@@ -699,6 +699,93 @@ _append_decisions "$DTMP/p_nodec.txt" 7 "$DTMP/decisions.md"
 _assert "decisions: no DECISIONS field — unchanged" "3" \
   "$(wc -l < "$DTMP/decisions.md" | tr -d ' ')"
 
+# ── Group 14: force-max flag ──────────────────────────────────────
+echo "── force-max: setup.sh state + stop-hook bypass ─────────────"
+
+FMTMP=$(mktemp -d)
+trap 'rm -rf "$FMTMP"' EXIT
+
+# Helper: mirrors setup.sh _state() force_max write
+_write_state_fm() {
+  local path="$1" force_max="${2:-false}" max_iter="${3:-5}"
+  mkdir -p "$(dirname "$path")"
+  {
+    echo "---"; echo "active: true"; echo "iteration: 2"
+    echo "max_iterations: $max_iter"
+    echo "completion_promise: \"COMPLETE\""
+    [[ "$force_max" == "true" ]] && echo "force_max: true"
+    echo "---"
+    echo "do the work"
+  } > "$path"
+}
+
+# Helper: mirrors stop-hook.sh _field
+_field_fm() {
+  local key="$1" default="${2:-}" file="$3"
+  val=$(awk -v k="$key" '
+    /^---$/ { count++; next }
+    count == 1 && $0 ~ "^"k":" { sub(/^[^:]+:[[:space:]]*/, ""); gsub(/^"|"$/, ""); print; exit }
+  ' "$file" 2>/dev/null || echo "")
+  echo "${val:-$default}"
+}
+
+# Helper: mirrors force-max bypass logic
+_force_max_bypass() {
+  local state="$1"
+  local force_max iteration max_iterations
+  force_max=$(_field_fm "force_max" "false" "$state")
+  iteration=$(_field_fm "iteration" "1" "$state")
+  max_iterations=$(_field_fm "max_iterations" "50" "$state")
+  if [[ "$force_max" == "true" && "$iteration" -lt "$max_iterations" ]]; then
+    echo "bypass"
+  else
+    echo "complete"
+  fi
+}
+
+# State writes force_max when flag is set
+_write_state_fm "$FMTMP/state_on.md" "true" "10"
+_assert "force-max: force_max field written when flag set" \
+  "true" "$(_field_fm "force_max" "false" "$FMTMP/state_on.md")"
+
+# State does NOT write force_max when flag is off
+_write_state_fm "$FMTMP/state_off.md" "false" "10"
+_assert "force-max: force_max field absent when flag not set" \
+  "false" "$(_field_fm "force_max" "false" "$FMTMP/state_off.md")"
+
+# force-max active, iter < max → bypass (re-inject, not complete)
+_write_state_fm "$FMTMP/state_active.md" "true" "10"
+_assert "force-max: bypass when iter(2) < max(10)" \
+  "bypass" "$(_force_max_bypass "$FMTMP/state_active.md")"
+
+# force-max active, iter == max → complete
+{
+  echo "---"; echo "active: true"; echo "iteration: 10"
+  echo "max_iterations: 10"
+  echo "completion_promise: \"COMPLETE\""
+  echo "force_max: true"
+  echo "---"
+  echo "do the work"
+} > "$FMTMP/state_at_max.md"
+_assert "force-max: complete when iter(10) == max(10)" \
+  "complete" "$(_force_max_bypass "$FMTMP/state_at_max.md")"
+
+# force-max not set → complete immediately (normal behavior)
+_write_state_fm "$FMTMP/state_normal.md" "false" "10"
+_assert "force-max: normal completion when not set" \
+  "complete" "$(_force_max_bypass "$FMTMP/state_normal.md")"
+
+# setup.sh help text includes --force-max
+_FM_COUNT=$(grep -c -- "--force-max" "${PLUGIN_ROOT}/scripts/setup.sh" || true)
+_assert "force-max: --help includes --force-max flag" \
+  "true" "$([[ "$_FM_COUNT" -ge 1 ]] && echo true || echo false)"
+
+# All 4 command argument-hints mention --force-max
+for cmd in start start-with-judge start-autonomous start-parallel; do
+  _assert "force-max: $cmd.md argument-hint updated" \
+    "1" "$(grep -c "\-\-force-max" "${PLUGIN_ROOT}/commands/${cmd}.md" || true)"
+done
+
 echo ""
 echo "── Results ──────────────────────────────────────────────────"
 echo "  PASS: $PASS  FAIL: $FAIL"

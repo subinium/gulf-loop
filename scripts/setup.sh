@@ -33,6 +33,7 @@ WORKERS=2
 COMPLETION_PROMISE="COMPLETE"
 MILESTONE_EVERY=0
 STRUCTURED_MEMORY=false
+FORCE_MAX=false
 PROMPT_PARTS=()
 
 # ── Parse remaining args ──────────────────────────────────────────
@@ -46,6 +47,7 @@ while [[ $# -gt 0 ]]; do
     --completion-promise|-p) COMPLETION_PROMISE="$2";  shift 2 ;;
     --milestone-every|-m)    MILESTONE_EVERY="$2";     shift 2 ;;
     --structured-memory)     STRUCTURED_MEMORY=true;    shift   ;;
+    --force-max)             FORCE_MAX=true;            shift   ;;
     --help|-h)
       echo "Usage: setup.sh --mode basic|judge|autonomous|parallel [OPTIONS] PROMPT"
       echo "  --max-iterations N       Max iterations (default: 50/200 by mode)"
@@ -56,6 +58,7 @@ while [[ $# -gt 0 ]]; do
       echo "  --completion-promise TEXT  Completion signal (basic, default: COMPLETE)"
       echo "  --milestone-every N      Pause every N iterations for human review (default: 0=off)"
       echo "  --structured-memory      Scaffold .claude/memory/ wiki on init (opt-in)"
+      echo "  --force-max              Always run all max-iterations regardless of completion signal"
       exit 0 ;;
     *) PROMPT_PARTS+=("$1"); shift ;;
   esac
@@ -109,6 +112,7 @@ _state() {
     [[ -n "$worktree" ]] && echo "worktree_path: $worktree"
     [[ "$MILESTONE_EVERY" -gt 0 ]] && echo "milestone_every: $MILESTONE_EVERY"
     [[ "$STRUCTURED_MEMORY" == "true" ]] && echo "structured_memory: true"
+    [[ "$FORCE_MAX" == "true" ]] && echo "force_max: true"
     echo "---"; echo "$PROMPT"
   } > "$path"
 }

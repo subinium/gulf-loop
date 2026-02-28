@@ -66,6 +66,7 @@ BASE_BRANCH=$(_field "base_branch" "main")
 MILESTONE_EVERY=$(_field "milestone_every" "0")
 WORKTREE_PATH=$(_field "worktree_path" "")
 STRUCTURED_MEMORY=$(_field "structured_memory" "false")
+FORCE_MAX=$(_field "force_max" "false")
 
 # Validate numerics
 [[ "$ITERATION" =~ ^[0-9]+$ ]]       || ITERATION=1
@@ -491,6 +492,16 @@ if [[ "$JUDGE_ENABLED" == "true" ]]; then
     if [[ -n "$JUDGE_META" ]]; then
       printf '[iter %s] APPROVED — %s\n' "$ITERATION" "$JUDGE_META" >> "JUDGE_EVOLUTION.md"
     fi
+    # force-max: acknowledge approval but keep running until max_iterations
+    if [[ "$FORCE_MAX" == "true" && "$ITERATION" -lt "$MAX_ITERATIONS" ]]; then
+      _update_field "iteration" "$NEXT"
+      _update_field "consecutive_rejections" "0"
+      FULL_REASON="$(printf '%s\n\n---\n## Judge APPROVED (iteration %s) — continuing (force-max)\n\nThe judge approved your work. However, **--force-max** is active:\nthe loop continues until iteration %s.\n\nKeep improving. The loop will complete at max iterations.\n---\n\n%s' \
+        "$PROMPT" "$ITERATION" "$MAX_ITERATIONS" "$FRAMEWORK")"
+      _block "$FULL_REASON" \
+        "Gulf Loop | Iter $NEXT/$MAX_ITERATIONS | Judge APPROVED — force-max continues"
+      exit 0
+    fi
     if [[ "$AUTONOMOUS" == "true" && -n "$BRANCH" ]]; then
       _try_merge
     else
@@ -564,6 +575,15 @@ else
   PROMISE_TAG="<promise>${COMPLETION_PROMISE}</promise>"
 
   if echo "$LAST_MSG" | grep -qF "$PROMISE_TAG"; then
+    # force-max: acknowledge promise but keep running until max_iterations
+    if [[ "$FORCE_MAX" == "true" && "$ITERATION" -lt "$MAX_ITERATIONS" ]]; then
+      _update_field "iteration" "$NEXT"
+      FULL_REASON="$(printf '%s\n\n---\n## Completion signal found (iteration %s) — continuing (force-max)\n\nYour completion signal was received. However, **--force-max** is active:\nthe loop continues until iteration %s.\n\nKeep improving. The loop will complete at max iterations.\n---\n\n%s' \
+        "$PROMPT" "$ITERATION" "$MAX_ITERATIONS" "$FRAMEWORK")"
+      _block "$FULL_REASON" \
+        "Gulf Loop | Iter $NEXT/$MAX_ITERATIONS | Promise received — force-max continues"
+      exit 0
+    fi
     # Soft-check: warn if structured memory was never maintained
     local MEM_DIR=".claude/memory"
     if [[ "$STRUCTURED_MEMORY" == "true" && -f "$MEM_DIR/loops/current.md" ]]; then
